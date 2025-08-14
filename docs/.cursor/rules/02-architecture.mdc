@@ -1,0 +1,30 @@
+---
+description: "The project's official v1.0 architecture, including the monorepo structure, package responsibilities, and the core Dual-Track architectural principles."
+alwaysApply: true
+---
+
+# 🏗️ v1.0 Architecture
+
+## Official Project Plan
+All development is governed by the **`PROJECT_BLUEPRINT.md`**. This rule file summarizes the key architectural decisions for easy reference.
+
+## Dual-Track Architecture
+The v1.0 architecture is composed of two primary systems working in concert:
+
+1.  **Fast Track (Live)**: A low-latency conversational experience using P2P (for 1:1) and a lightweight SFU (for 3+) connections. This track prioritizes responsiveness.
+2.  **Slow Track (Archival)**: A local, high-fidelity, client-encrypted media pipeline. It uses a chunked manifest for resumable uploads via `tus` to guarantee data integrity. This track prioritizes quality and reliability.
+
+### Monorepo Structure (PNPM Workspace)
+```
+/packages
+├── core/      # Slow-Track Engine (WASM, WebCodecs, Timebase, Manifest)
+├── react/     # React Hooks & Context for the client-side app
+├── ui/        # Presentational UI Component Library (Storybook)
+└── app/       # The main web application (Integration Layer)
+```
+
+### Package Dependency Rules
+- **`@beings/core`**: Must have ZERO framework dependencies. Contains the core logic for the "Slow Track".
+- **`@beings/react`**: Depends only on `@beings/core` and the React ecosystem.
+- **`@beings/ui`**: Purely presentational; receives all state via props.
+- **`@beings/app`**: The integration layer that consumes all other packages.

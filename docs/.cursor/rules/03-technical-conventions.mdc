@@ -1,0 +1,42 @@
+---
+description: "Technical standards for code quality, performance, error handling, and implementation patterns. Applies to all source code."
+globs:
+  - "packages/**/src/**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# 💻 Development Standards & Guidelines
+
+### Code Quality Requirements
+- **TypeScript**: Use strict mode, no `any`, and write comprehensive interfaces. All component props must have explicit TypeScript interfaces with TSDoc comments.
+- **Performance**: Implement resource cleanup patterns for long research sessions to prevent memory leaks. Particular attention to MediaStream cleanup and recording blob disposal.
+- **Error Handling**: Use enterprise-grade patterns with comprehensive `try/catch` and user-friendly error messages appropriate for research professionals.
+- **Testing**: Follow our testing strategy (Unit for core, RTL for hooks/components, E2E for app flows, Storybook for component documentation).
+- **Code Documentation**: Use TSDoc comments (`/** ... */`) for all exported functions, types, and interfaces.
+- **Animation Library**: We use **Framer Motion** as the standard library for all complex component animations and transitions.
+
+### UI & Component Requirements
+- **Design System**: Use Material 3 design system via MUI v6. Follow semantic theming with proper color tokens.
+- **Component Architecture**: All UI components must be purely presentational, receiving state via props and communicating changes via callbacks.
+- **Accessibility**: Implement ARIA labels, semantic HTML, keyboard navigation, and proper focus management.
+- **Theme Support**: All components must support both light and dark themes.
+
+### Recording & Media Requirements (v1.0 Architecture)
+- **Encryption**: All "Slow Track" data must be encrypted client-side using **AES-GCM** before upload.
+- **Uploads**: Use the **`tus`** protocol for resumable, chunked uploads.
+- **Manifest**: A per-recording manifest must be generated, containing per-chunk metadata (`seq`, `t_session_ms`, `dur_ms`, `size`, `sha256`, `crc32c`, `iv`).
+- **Audio Quality**: Maintain broadcast-grade audio quality. Default to **WAV** PCM capture, with **FLAC (WASM)** as a CPU-gated enhancement.
+- **MediaStream Management**: Implement proper stream lifecycle management with cleanup on component unmount and error states.
+- **Recording State Management**: Implement comprehensive state machines for recording flows: `idle → initializing → recording → saving → success/error`.
+
+### Critical DOs and DON'Ts
+- ✅ **DO** follow the "Dual-Track" architecture (Fast Track for live, Slow Track for archival).
+- ✅ **DO** encrypt all user media client-side before it leaves the device.
+- ✅ **DO** implement comprehensive resource cleanup and error handling.
+- ✅ **DO** provide comprehensive Storybook documentation for all UI components.
+- ✅ **DO** implement proper accessibility standards.
+- ✅ **DO** use Material 3 design tokens and semantic theming.
+- ❌ **DON'T** add framework dependencies to the `@beings/core` package.
+- ❌ **DON'T** compromise data integrity for convenience.
+- ❌ **DON'T** store any unencrypted user media on the server.
+- ❌ **DON'T** skip writing tests for new logic.

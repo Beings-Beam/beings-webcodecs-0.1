@@ -1,0 +1,22 @@
+{
+  "name": "@beings/core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "mp4-muxer": "^4.0.0",
+    "webm-muxer": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0",
+    "jsdom": "^23.0.0",
+    "vite": "^5.0.0"
+  }
+}

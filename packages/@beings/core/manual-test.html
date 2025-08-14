@@ -1,0 +1,2493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlowTrackRecorder - Screenshare Test</title>
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --border-color: #dddddd;
+            --section-bg: #ffffff;
+            --button-bg: #007AFF;
+            --button-hover: #0056CC;
+            --success-bg: #E8F5E8;
+            --success-color: #2E7D32;
+            --success-border: #C8E6C9;
+            --info-bg: #E3F2FD;
+            --info-color: #1976D2;
+            --info-border: #BBDEFB;
+            --error-bg: #FFEBEE;
+            --error-color: #C62828;
+            --error-border: #FFCDD2;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a;
+            --text-color: #ffffff;
+            --border-color: #333333;
+            --section-bg: #2a2a2a;
+            --button-bg: #0A84FF;
+            --button-hover: #0066CC;
+            --success-bg: #1e3a1e;
+            --success-color: #4CAF50;
+            --success-border: #2e5d2e;
+            --info-bg: #1e2a3a;
+            --info-color: #64B5F6;
+            --info-border: #2e4d5d;
+            --error-bg: #3a1e1e;
+            --error-color: #F44336;
+            --error-border: #5d2e2e;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            font-size: 13px;
+            line-height: 1.4;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 100%;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+
+        /* Responsive breakpoints */
+        @media (min-width: 768px) {
+            .container {
+                padding: 24px;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .container {
+                padding: 32px;
+            }
+        }
+
+        @media (min-width: 1440px) {
+            .container {
+                padding: 40px;
+            }
+        }
+
+        .header-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        @media (max-width: 767px) {
+            .header-controls {
+                flex-direction: column;
+                align-items: stretch;
+                text-align: center;
+            }
+            
+            .header-controls h1 {
+                margin-bottom: 16px;
+            }
+        }
+
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: 16px;
+        }
+
+        .zoom-button {
+            background: var(--button-bg);
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 14px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            min-width: 28px;
+        }
+
+        .zoom-button:hover {
+            background: var(--button-hover);
+        }
+
+        .zoom-level {
+            font-size: 11px;
+            color: var(--text-color);
+            min-width: 35px;
+            text-align: center;
+        }
+
+        .dark-mode-toggle {
+            background: var(--button-bg);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .dark-mode-toggle:hover {
+            background: var(--button-hover);
+        }
+        
+        h1 {
+            color: var(--text-color);
+            margin: 0;
+            font-size: 20px;
+        }
+        
+        h2 {
+            font-size: 16px;
+            margin: 0 0 12px 0;
+        }
+        
+        h4 {
+            font-size: 12px;
+            margin: 0 0 6px 0;
+        }
+        
+        .section {
+            margin-bottom: 24px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: var(--section-bg);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        @media (min-width: 768px) {
+            .section {
+                padding: 24px;
+                margin-bottom: 32px;
+            }
+        }
+
+        /* Grid layout for larger screens */
+        .sections-grid {
+            display: grid;
+            gap: 24px;
+            grid-template-columns: 1fr;
+            grid-template-areas: 
+                "main"
+                "sidebar"
+                "results";
+        }
+
+        @media (min-width: 900px) {
+            .sections-grid {
+                grid-template-columns: 3fr 7fr;
+                grid-template-areas: 
+                    "main sidebar"
+                    "results results";
+                gap: 32px;
+            }
+        }
+        
+        .section.main-section {
+            grid-area: main;
+        }
+        
+        .section.sidebar-section {
+            grid-area: sidebar;
+        }
+        
+        .section.results-section {
+            grid-area: results;
+        }
+        
+        /* Results section specific styling */
+        @media (min-width: 900px) {
+            .section.results-section {
+                /* Full width on desktop, so we can use more space efficiently */
+                max-width: none;
+            }
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        @media (max-width: 767px) {
+            .controls-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .controls-row button {
+                width: 100%;
+                margin-right: 0;
+            }
+        }
+        
+        button {
+            background: var(--button-bg);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-right: 8px;
+            transition: background-color 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        button svg {
+            flex-shrink: 0;
+        }
+
+        #screenshareButton,
+        #recordButton,
+        #stopButton {
+            padding: 12px;
+            min-width: 44px;
+            min-height: 44px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #screenshareButton {
+            background: var(--button-bg);
+        }
+
+        #recordButton {
+            background: #dc3545;
+        }
+
+        #recordButton:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        #stopButton {
+            background: #6c757d;
+        }
+
+        #stopButton:disabled {
+            background: #495057;
+            cursor: not-allowed;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        button:hover:not(:disabled) {
+            background: var(--button-hover);
+        }
+        
+        video {
+            width: 100%;
+            max-width: 100%;
+            background: #000;
+            border-radius: 6px;
+            height: auto;
+            aspect-ratio: 16/9;
+            object-fit: contain;
+        }
+
+        @media (min-width: 1200px) {
+            video {
+                max-width: 800px;
+            }
+        }
+        
+        #results {
+            margin-top: 20px;
+        }
+        
+        .download-link {
+            display: inline-block;
+            background: #34C759;
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        
+        .download-link:hover {
+            background: #28A745;
+        }
+        
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        
+        .status.info {
+            background: var(--info-bg);
+            color: var(--info-color);
+            border: 1px solid var(--info-border);
+        }
+        
+        .status.success {
+            background: var(--success-bg);
+            color: var(--success-color);
+            border: 1px solid var(--success-border);
+        }
+        
+        .status.error {
+            background: var(--error-bg);
+            color: var(--error-color);
+            border: 1px solid var(--error-border);
+        }
+
+        /* Stats section responsive styles */
+        .stats-section {
+            margin-bottom: 8px;
+            break-inside: avoid;
+        }
+
+        .stats-section h4 {
+            margin: 0 0 4px 0;
+            color: var(--text-color);
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .stats-section div {
+            margin-bottom: 2px;
+            font-size: 9px;
+        }
+
+        /* Two-column layout for stats */
+        #stats {
+            column-count: 2;
+            column-gap: 16px;
+            column-fill: balance;
+        }
+
+        @media (max-width: 767px) {
+            #stats {
+                column-count: 1;
+            }
+            .stats-section div {
+                font-size: 8px;
+            }
+        }
+
+        /* Font size slider styling */
+        #fontSizeSlider {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        #fontSizeSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: var(--button-bg);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        #fontSizeSlider::-webkit-slider-thumb:hover {
+            background: var(--button-hover);
+        }
+
+        #fontSizeSlider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: var(--button-bg);
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        #fontSizeSlider::-moz-range-thumb:hover {
+            background: var(--button-hover);
+        }
+
+        /* Select element responsive styles */
+        select {
+            width: 100%;
+            max-width: 300px;
+        }
+
+        @media (max-width: 767px) {
+            select {
+                max-width: 100%;
+            }
+        }
+
+        /* Record time chip styles */
+        .record-time-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--error-bg);
+            color: var(--error-color);
+            border: 1px solid var(--error-border);
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: 600;
+            opacity: 0;
+            transform: translateY(-4px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+
+        .record-time-chip.recording {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .record-time-chip .record-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--error-color);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .record-time-chip .chip-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .record-time-chip .time-display {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.5px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .record-time-chip .size-display {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.3px;
+            font-size: 9px;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-controls">
+            <h1>SlowTrackRecorder - Screenshare Test</h1>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="zoom-controls">
+                    <button class="zoom-button" id="zoomOutButton">−</button>
+                    <span class="zoom-level" id="zoomLevel">100%</span>
+                    <button class="zoom-button" id="zoomInButton">+</button>
+                </div>
+                <button class="dark-mode-toggle" id="darkModeToggle">🌙 Dark</button>
+            </div>
+        </div>
+        
+        <div class="sections-grid">
+            <div class="section main-section">
+                <h2>Live Preview</h2>
+                <div class="controls">
+                    <div style="margin-bottom: 16px;">
+                        <label for="resolutionSelector" style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-color);">Recording Resolution:</label>
+                        <select id="resolutionSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                            <option value="auto">Auto (Downscale to 1080p Max)</option>
+                            <option value="4k">Force 3840×2160 (4K)</option>
+                            <option value="1080p">Force 1920×1080 (1080p)</option>
+                            <option value="720p">Force 1280×720 (720p)</option>
+                            <option value="540p">Force 960×540 (540p)</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label for="frameRateSelector" style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-color);">Frame Rate:</label>
+                        <select id="frameRateSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                            <option value="auto">Auto</option>
+                            <option value="60">60 fps</option>
+                            <option value="30">30 fps</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label for="forceFailCheckbox" style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text-color); cursor: pointer;">
+                            <input type="checkbox" id="forceFailCheckbox" style="margin: 0;">
+                            <span>Force H.264 Failure (for testing)</span>
+                        </label>
+                    </div>
+
+                    <div class="controls-row">
+                        <button id="openTabButton">1. Open YouTube Tab</button>
+                        <button id="screenshareButton" title="Start Screen Share">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+                            </svg>
+                        </button>
+                        <button id="recordButton" disabled title="Start Recording">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <circle cx="12" cy="12" r="10" fill="currentColor"/>
+                            </svg>
+                        </button>
+                        <button id="stopButton" disabled title="Stop Recording">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="6" y="6" width="12" height="12" fill="currentColor"/>
+                            </svg>
+                        </button>
+                        <div class="record-time-chip" id="recordTimeChip">
+                            <div class="record-indicator"></div>
+                            <div class="chip-content">
+                                <span class="time-display" id="timeDisplay">00:00</span>
+                                <span class="size-display" id="sizeDisplay">0 MB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Encoder Settings -->
+                    <div style="margin-top: 24px; padding: 16px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--section-bg);">
+                        <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: var(--text-color);">⚙️ Advanced Encoder Settings</h4>
+                        
+                        <!-- Bitrate Control -->
+                        <div style="margin-bottom: 16px;">
+                            <label for="bitrateSlider" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Target Bitrate: <span id="bitrateValue">5.0 Mbps</span>
+                            </label>
+                            <input type="range" id="bitrateSlider" min="1000000" max="20000000" step="500000" value="5000000" 
+                                   style="width: 100%; margin-bottom: 4px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-color); opacity: 0.7;">
+                                <span>1 Mbps</span>
+                                <span>5 Mbps</span>
+                                <span>10 Mbps</span>
+                                <span>15 Mbps</span>
+                                <span>20 Mbps</span>
+                            </div>
+                        </div>
+
+                        <!-- Keyframe Interval Control -->
+                        <div style="margin-bottom: 16px;">
+                            <label for="keyframeInterval" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Keyframe Interval (seconds):
+                            </label>
+                            <input type="number" id="keyframeInterval" min="0.5" max="10" step="0.5" value="2" 
+                                   style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px; width: 80px;">
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Lower = better seeking, higher file size</span>
+                        </div>
+
+                        <!-- Hardware Acceleration Control -->
+                        <div style="margin-bottom: 16px;">
+                            <label for="hardwareAcceleration" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Hardware Acceleration:
+                            </label>
+                            <select id="hardwareAcceleration" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                                <option value="prefer-hardware">Prefer Hardware</option>
+                                <option value="prefer-software">Prefer Software</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Use software if hardware fails</span>
+                        </div>
+
+                        <!-- Codec Selection Control -->
+                        <div style="margin-bottom: 0;">
+                            <label for="codecSelection" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Codec:
+                            </label>
+                            <select id="codecSelection" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                                <option value="auto">Auto-detect (Recommended)</option>
+                                <option value="av1">AV1 (WebM)</option>
+                                <option value="hevc">HEVC (MP4)</option>
+                                <option value="h264">H.264 (MP4)</option>
+                                <option value="vp9">VP9 (WebM)</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Auto-detect tries AV1 → HEVC → H.264 → VP9</span>
+                        </div>
+                    </div>
+                </div>
+                <video id="preview" autoplay muted playsinline></video>
+                <div id="status"></div>
+            </div>
+            
+            <div class="section sidebar-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h2 style="margin: 0;">System Stats</h2>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="fontSizeSlider" style="font-size: 11px; color: var(--text-color);">Font:</label>
+                        <input type="range" id="fontSizeSlider" min="8" max="14" value="12" step="1" style="width: 80px;">
+                        <span id="fontSizeDisplay" style="font-size: 10px; color: var(--text-color); min-width: 24px;">12px</span>
+                    </div>
+                </div>
+                <div id="stats" style="font-family: monospace; font-size: 12px; line-height: 1.2;">
+                    <div class="stats-section">
+                        <h4>Recording Stats</h4>
+                        <div>Input FPS: <span id="inputFps">--</span></div>
+                        <div>Encoder Queue: <span id="encoderQueue">--</span></div>
+                        <div>Output Bitrate: <span id="outputBitrate">--</span></div>
+                        <div>Dropped Frames: <span id="droppedFrames">--</span></div>
+                        <div>Encoding Latency: <span id="encodingLatency">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Stream Quality</h4>
+                        <div>Actual Resolution: <span id="actualResolution">--</span></div>
+                        <div>Compression Ratio: <span id="compressionRatio">--</span></div>
+                        <div>Keyframe Interval: <span id="keyframeInterval">--</span></div>
+                        <div>Bitrate Variance: <span id="bitrateVariance">--</span></div>
+                        <div>Quality Score: <span id="qualityScore">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Codec Details</h4>
+                        <div>Active Codec: <span id="activeCodec">--</span></div>
+                        <div>Profile/Level: <span id="profileLevel">--</span></div>
+                        <div>Color Space: <span id="colorSpace">--</span></div>
+                        <div>Chroma Sampling: <span id="chromaSampling">--</span></div>
+                        <div>GOP Size: <span id="gopSize">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>System Health</h4>
+                        <div>CPU Pressure: <span id="cpuPressure">--</span></div>
+                        <div>Memory Usage: <span id="memoryUsage">--</span></div>
+                        <div>Browser Storage: <span id="diskSpace">--</span></div>
+                        <div>Write Speed: <span id="writeSpeed">--</span></div>
+                        <div>Buffer Health: <span id="bufferHealth">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Web Workers</h4>
+                        <div>Worker Status: <span id="workerStatus">--</span></div>
+                        <div>Message Queue: <span id="messageQueue">--</span></div>
+                        <div>Worker Errors: <span id="workerErrors">--</span></div>
+                        <div>Processing Speed: <span id="processingSpeed">--</span></div>
+                        <div>Memory Pool: <span id="memoryPool">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Canvas & Encoding</h4>
+                        <div>Offscreen Canvas: <span id="offscreenCanvas">--</span></div>
+                        <div>Hardware Accel: <span id="hardwareAccel">--</span></div>
+                        <div>Encoder Type: <span id="encoderType">--</span></div>
+                        <div>Frame Uniformity: <span id="frameUniformity">--</span></div>
+                        <div>Scene Changes: <span id="sceneChanges">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>GPU Information</h4>
+                        <div>GPU Vendor: <span id="gpuVendor">--</span></div>
+                        <div>GPU Renderer: <span id="gpuRenderer">--</span></div>
+                        <div>GPU Memory: <span id="gpuMemory">--</span></div>
+                        <div>Max Texture Size: <span id="maxTextureSize">--</span></div>
+                        <div>Encoder Model: <span id="encoderModel">--</span></div>
+                        <div>HW Acceleration: <span id="hardwareAccelStatus">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Codec Support</h4>
+                        <div>H.264 HW: <span id="h264Hardware">--</span></div>
+                        <div>VP9 HW: <span id="vp9Hardware">--</span></div>
+                        <div>HEVC/H.265: <span id="hevcSupport">--</span></div>
+                        <div>AV1 Support: <span id="av1Support">--</span></div>
+                        <div>WebCodecs API: <span id="webcodecsApi">--</span></div>
+                        <div>MediaRecorder: <span id="mediaRecorderApi">--</span></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section results-section">
+                <h2>Recording Results</h2>
+                <div id="results">
+                    <p>Start a recording to see results here.</p>
+                </div>
+            </div>
+        </div>
+    </div></body>
+
+    <script type="module">
+        import { SlowTrackRecorder } from './src/index.ts';
+
+        // Get DOM element references
+        const openTabButton = document.getElementById('openTabButton');
+        const screenshareButton = document.getElementById('screenshareButton');
+        const recordButton = document.getElementById('recordButton');
+        const stopButton = document.getElementById('stopButton');
+        const previewVideo = document.getElementById('preview');
+        const resultsDiv = document.getElementById('results');
+        const statusDiv = document.getElementById('status');
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const zoomInButton = document.getElementById('zoomInButton');
+        const zoomOutButton = document.getElementById('zoomOutButton');
+        const zoomLevel = document.getElementById('zoomLevel');
+        const resolutionSelector = document.getElementById('resolutionSelector');
+        const frameRateSelector = document.getElementById('frameRateSelector');
+        const recordTimeChip = document.getElementById('recordTimeChip');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const sizeDisplay = document.getElementById('sizeDisplay');
+        const fontSizeSlider = document.getElementById('fontSizeSlider');
+        const fontSizeDisplay = document.getElementById('fontSizeDisplay');
+        const statsContainer = document.getElementById('stats');
+        const forceFailCheckbox = document.getElementById('forceFailCheckbox');
+        
+        // Get stats element references
+        const inputFpsSpan = document.getElementById('inputFps');
+        const encoderQueueSpan = document.getElementById('encoderQueue');
+        const outputBitrateSpan = document.getElementById('outputBitrate');
+        const cpuPressureSpan = document.getElementById('cpuPressure');
+        const memoryUsageSpan = document.getElementById('memoryUsage');
+        const diskSpaceSpan = document.getElementById('diskSpace');
+        
+        // Get worker and canvas stats element references
+        const workerStatusSpan = document.getElementById('workerStatus');
+        const messageQueueSpan = document.getElementById('messageQueue');
+        const workerErrorsSpan = document.getElementById('workerErrors');
+        const offscreenCanvasSpan = document.getElementById('offscreenCanvas');
+        const hardwareAccelSpan = document.getElementById('hardwareAccel');
+        const encoderTypeSpan = document.getElementById('encoderType');
+        
+        // Get GPU stats element references
+        const gpuVendorSpan = document.getElementById('gpuVendor');
+        const gpuRendererSpan = document.getElementById('gpuRenderer');
+        const gpuMemorySpan = document.getElementById('gpuMemory');
+        const maxTextureSizeSpan = document.getElementById('maxTextureSize');
+        const encoderModelSpan = document.getElementById('encoderModel');
+        const hardwareAccelStatusSpan = document.getElementById('hardwareAccelStatus');
+        
+        // Get advanced video stats element references
+        const droppedFramesSpan = document.getElementById('droppedFrames');
+        const encodingLatencySpan = document.getElementById('encodingLatency');
+        const actualResolutionSpan = document.getElementById('actualResolution');
+        const compressionRatioSpan = document.getElementById('compressionRatio');
+        const keyframeIntervalSpan = document.getElementById('keyframeInterval');
+        const bitrateVarianceSpan = document.getElementById('bitrateVariance');
+        const qualityScoreSpan = document.getElementById('qualityScore');
+        const activeCodecSpan = document.getElementById('activeCodec');
+        const profileLevelSpan = document.getElementById('profileLevel');
+        const colorSpaceSpan = document.getElementById('colorSpace');
+        const chromaSamplingSpan = document.getElementById('chromaSampling');
+        const gopSizeSpan = document.getElementById('gopSize');
+        const writeSpeedSpan = document.getElementById('writeSpeed');
+        const bufferHealthSpan = document.getElementById('bufferHealth');
+        const processingSpeedSpan = document.getElementById('processingSpeed');
+        const memoryPoolSpan = document.getElementById('memoryPool');
+        const frameUniformitySpan = document.getElementById('frameUniformity');
+        const sceneChangesSpan = document.getElementById('sceneChanges');
+        const h264HardwareSpan = document.getElementById('h264Hardware');
+        const vp9HardwareSpan = document.getElementById('vp9Hardware');
+        const hevcSupportSpan = document.getElementById('hevcSupport');
+        const av1SupportSpan = document.getElementById('av1Support');
+        const webcodecsApiSpan = document.getElementById('webcodecsApi');
+        const mediaRecorderApiSpan = document.getElementById('mediaRecorderApi');
+
+        // State variables
+        let recorder = null;
+        let mediaStream = null;
+
+        // System health monitoring state
+        let statsInterval = null;
+
+        // Recording timer state
+        let recordingStartTime = null;
+        let recordingTimer = null;
+
+        // Worker and canvas monitoring state
+        let workerMessageCount = 0;
+        let workerErrorCount = 0;
+        let workerStartTime = null;
+        let canvasCapabilities = null;
+        let gpuInfo = null;
+
+        // Advanced video stats state
+        let videoStats = {
+            droppedFrames: 0,
+            totalFrames: 0,
+            encodingLatency: 0,
+            compressionRatio: 0,
+            keyframeCount: 0,
+            bitrateHistory: [],
+            qualityScore: 0,
+            writeSpeed: 0,
+            bufferSize: 0,
+            sceneChangeCount: 0,
+            frameVariance: 0,
+            codecSupport: null
+        };
+
+        // Performance monitoring (non-blocking)
+        let statsUpdateCount = 0;
+        let lastStatsUpdate = 0;
+
+        // Codec tracking
+        let finalCodec = null;
+
+        // Zoom state
+        let currentZoom = 100;
+        const zoomLevels = [50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
+
+        // Debug function to check all codec support (call from console)
+        window.debugCodecSupport = async function() {
+            console.log('🔍 Codec Support Debug Report');
+            console.log('Platform:', navigator.platform);
+            console.log('User Agent:', navigator.userAgent);
+            
+            const codecs = [
+                'av01.0.04M.08',  // AV1
+                'hvc1.1.6.L93.B0', // HEVC
+                'avc1.42001f',     // H.264
+                'vp09.00.10.08'    // VP9
+            ];
+            
+            for (const codec of codecs) {
+                try {
+                    const config = {
+                        codec,
+                        width: 1280,
+                        height: 720,
+                        bitrate: 2500000,
+                        framerate: 30
+                    };
+                    
+                    const support = await VideoEncoder.isConfigSupported(config);
+                    const codecName = codec.startsWith('av01') ? 'AV1' : 
+                                    codec.startsWith('hvc1') ? 'HEVC' : 
+                                    codec.startsWith('avc1') ? 'H.264' : 'VP9';
+                    
+                    console.log(`${codecName} (${codec}):`, support.supported ? '✅ Supported' : '❌ Not supported');
+                    if (support.supported && support.config) {
+                        console.log(`  Hardware Accel: ${support.config.hardwareAcceleration || 'unknown'}`);
+                    }
+                } catch (error) {
+                    console.log(`${codec}: ❌ Error -`, error.message);
+                }
+            }
+        };
+
+        // Initialize system health monitoring
+        async function initializeSystemHealth() {
+            // Initialize disk space estimation
+            await initializeDiskSpace();
+            
+            // Initialize CPU pressure monitoring
+            initializeCPUPressure();
+            
+            // Initialize canvas capabilities detection
+            initializeCanvasCapabilities();
+            
+            // Initialize GPU detection
+            initializeGPUDetection();
+            
+            // Initialize codec support detection
+            initializeCodecSupport();
+        }
+
+        // Initialize disk space monitoring (one-time)
+        async function initializeDiskSpace() {
+            try {
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const estimate = await navigator.storage.estimate();
+                    const availableGB = ((estimate.quota || 0) - (estimate.usage || 0)) / (1024 ** 3);
+                    diskSpaceSpan.textContent = `${availableGB.toFixed(1)} GB available`;
+                } else {
+                    diskSpaceSpan.textContent = 'N/A';
+                }
+            } catch (error) {
+                console.warn('Storage estimation failed:', error);
+                diskSpaceSpan.textContent = 'N/A';
+            }
+        }
+
+        // Initialize CPU pressure monitoring
+        function initializeCPUPressure() {
+            try {
+                if ('PressureObserver' in window) {
+                    const pressureObserver = new PressureObserver((records) => {
+                        const latestRecord = records[records.length - 1];
+                        updateCPUPressureDisplay(latestRecord.state);
+                    });
+                    pressureObserver.observe('cpu');
+                    cpuPressureSpan.textContent = '✅ Initializing...';
+                } else {
+                    cpuPressureSpan.textContent = 'N/A';
+                }
+            } catch (error) {
+                console.warn('CPU pressure monitoring failed:', error);
+                cpuPressureSpan.textContent = 'N/A';
+            }
+        }
+
+        // Update CPU pressure display with color coding
+        function updateCPUPressureDisplay(state) {
+            switch (state) {
+                case 'nominal':
+                    cpuPressureSpan.textContent = '✅ Nominal';
+                    cpuPressureSpan.style.color = '#4CAF50';
+                    break;
+                case 'fair':
+                    cpuPressureSpan.textContent = '⚠️ Fair';
+                    cpuPressureSpan.style.color = '#FF9800';
+                    break;
+                case 'serious':
+                    cpuPressureSpan.textContent = '🔶 Serious';
+                    cpuPressureSpan.style.color = '#FF5722';
+                    break;
+                case 'critical':
+                    cpuPressureSpan.textContent = '❌ Critical';
+                    cpuPressureSpan.style.color = '#F44336';
+                    break;
+                default:
+                    cpuPressureSpan.textContent = `${state}`;
+                    cpuPressureSpan.style.color = 'var(--text-color)';
+            }
+        }
+
+        // Initialize canvas capabilities detection
+        function initializeCanvasCapabilities() {
+            try {
+                canvasCapabilities = {
+                    offscreenCanvas: 'OffscreenCanvas' in window,
+                    webgl: false,
+                    webgl2: false,
+                    hardwareAcceleration: false,
+                    videoEncoder: 'VideoEncoder' in window,
+                    videoDecoder: 'VideoDecoder' in window
+                };
+
+                // Test WebGL support
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    canvasCapabilities.webgl = true;
+                    
+                    // Check for hardware acceleration
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        canvasCapabilities.hardwareAcceleration = !renderer.toLowerCase().includes('software');
+                        canvasCapabilities.renderer = renderer;
+                    }
+                }
+
+                // Test WebGL2 support
+                const gl2 = canvas.getContext('webgl2');
+                if (gl2) {
+                    canvasCapabilities.webgl2 = true;
+                }
+
+                // Update display immediately
+                updateCanvasStats();
+
+            } catch (error) {
+                console.warn('Canvas capabilities detection failed:', error);
+                canvasCapabilities = { error: true };
+                updateCanvasStats();
+            }
+        }
+
+        // Update canvas stats display
+        function updateCanvasStats() {
+            if (!canvasCapabilities) {
+                offscreenCanvasSpan.textContent = 'Detecting...';
+                hardwareAccelSpan.textContent = 'Detecting...';
+                encoderTypeSpan.textContent = 'Detecting...';
+                return;
+            }
+
+            if (canvasCapabilities.error) {
+                offscreenCanvasSpan.textContent = 'Error';
+                hardwareAccelSpan.textContent = 'Error';
+                encoderTypeSpan.textContent = 'Error';
+                return;
+            }
+
+            // Offscreen Canvas
+            offscreenCanvasSpan.textContent = canvasCapabilities.offscreenCanvas ? '✅ Available' : '❌ Not Available';
+            offscreenCanvasSpan.style.color = canvasCapabilities.offscreenCanvas ? '#4CAF50' : '#F44336';
+
+            // Hardware Acceleration
+            if (canvasCapabilities.hardwareAcceleration) {
+                hardwareAccelSpan.textContent = '✅ Hardware';
+                hardwareAccelSpan.style.color = '#4CAF50';
+            } else if (canvasCapabilities.webgl) {
+                hardwareAccelSpan.textContent = '⚠️ Software';
+                hardwareAccelSpan.style.color = '#FF9800';
+            } else {
+                hardwareAccelSpan.textContent = '❌ No WebGL';
+                hardwareAccelSpan.style.color = '#F44336';
+            }
+
+            // Encoder Type
+            if (canvasCapabilities.videoEncoder) {
+                encoderTypeSpan.textContent = '✅ WebCodecs';
+                encoderTypeSpan.style.color = '#4CAF50';
+            } else {
+                encoderTypeSpan.textContent = '⚠️ MediaRecorder';
+                encoderTypeSpan.style.color = '#FF9800';
+            }
+        }
+
+        // Update advanced video stats (performance-safe)
+        function updateAdvancedVideoStats() {
+            // Only update every few cycles to avoid performance impact
+            statsUpdateCount++;
+            const now = performance.now();
+            const shouldUpdate = statsUpdateCount % 3 === 0 || (now - lastStatsUpdate) > 2000;
+            
+            if (!shouldUpdate && recorder) return;
+            lastStatsUpdate = now;
+
+            if (recorder && recordingStartTime) {
+                // Recording Stats
+                const elapsedSeconds = (now - recordingStartTime) / 1000;
+                videoStats.totalFrames = Math.floor(elapsedSeconds * 30); // Estimate based on 30fps
+                
+                droppedFramesSpan.textContent = `${videoStats.droppedFrames}`;
+                droppedFramesSpan.style.color = videoStats.droppedFrames > 0 ? '#FF9800' : '#4CAF50';
+                
+                encodingLatencySpan.textContent = `${videoStats.encodingLatency.toFixed(1)}ms`;
+                encodingLatencySpan.style.color = videoStats.encodingLatency > 50 ? '#FF9800' : '#4CAF50';
+
+                // Stream Quality Stats
+                const [videoTrack] = mediaStream?.getVideoTracks() || [];
+                if (videoTrack) {
+                    const settings = videoTrack.getSettings();
+                    actualResolutionSpan.textContent = `${settings.width}×${settings.height}`;
+                    
+                    // Estimate compression ratio (placeholder calculation)
+                    const inputSize = (settings.width * settings.height * 24 * 30) / 8; // 24-bit RGB at 30fps
+                    const outputSize = 2500000 / 8; // 2.5Mbps
+                    videoStats.compressionRatio = inputSize / outputSize;
+                    compressionRatioSpan.textContent = `${videoStats.compressionRatio.toFixed(1)}:1`;
+                    compressionRatioSpan.style.color = videoStats.compressionRatio > 10 ? '#4CAF50' : '#FF9800';
+                }
+
+                // Keyframe interval (estimate)
+                keyframeIntervalSpan.textContent = '2.0s'; // Typical default
+                
+                // Bitrate variance calculation
+                if (videoStats.bitrateHistory.length > 10) {
+                    const avg = videoStats.bitrateHistory.reduce((a, b) => a + b) / videoStats.bitrateHistory.length;
+                    const variance = videoStats.bitrateHistory.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / videoStats.bitrateHistory.length;
+                    const stdDev = Math.sqrt(variance);
+                    const variancePercent = (stdDev / avg) * 100;
+                    bitrateVarianceSpan.textContent = `${variancePercent.toFixed(1)}%`;
+                    bitrateVarianceSpan.style.color = variancePercent < 10 ? '#4CAF50' : '#FF9800';
+                } else {
+                    bitrateVarianceSpan.textContent = 'Calculating...';
+                }
+
+                // Quality score (placeholder)
+                videoStats.qualityScore = Math.max(0, 100 - (videoStats.droppedFrames * 2) - (videoStats.encodingLatency / 2));
+                qualityScoreSpan.textContent = `${Math.round(videoStats.qualityScore)}/100`;
+                qualityScoreSpan.style.color = videoStats.qualityScore > 80 ? '#4CAF50' : videoStats.qualityScore > 60 ? '#FF9800' : '#F44336';
+
+                // Codec Details - only update if not already set
+                // Only update codec display when actually starting a recording
+                if (finalCodec) {
+                    // Recording started - show the actual codec being used
+                    updateCodecDisplay(finalCodec);
+                } else {
+                    // No finalCodec yet from worker - preserve hardware detection results
+                    // Don't revert to "Detecting..." if we have hardware detection results OR if we're recording
+                    const currentText = activeCodecSpan.textContent;
+                    const hasDetectionResults = currentText && 
+                        (currentText.includes('(HW Ready)') || currentText.includes('(Recording)') || currentText.includes('(Ready)') ||
+                         currentText === 'Software Only' || currentText === 'Not Available' || currentText === 'Error' ||
+                         currentText.startsWith('AV1') || currentText.startsWith('HEVC') || currentText.startsWith('H.264') || currentText.startsWith('VP9'));
+                    
+                    const hasHardwareSupport = videoStats.codecSupport && 
+                        (videoStats.codecSupport.av1Support || videoStats.codecSupport.hevcSupport || videoStats.codecSupport.h264Hardware || videoStats.codecSupport.vp9Hardware || videoStats.codecSupport.webcodecs);
+                    
+
+                    
+                    if (!hasDetectionResults && !hasHardwareSupport) {
+                        // Only show "Detecting..." if we truly don't have any results yet
+                        activeCodecSpan.textContent = 'Detecting...';
+                        profileLevelSpan.textContent = 'Detecting...';
+                        colorSpaceSpan.textContent = 'Detecting...';
+                        chromaSamplingSpan.textContent = 'Detecting...';
+                        gopSizeSpan.textContent = 'Detecting...';
+                    }
+                    // Otherwise, preserve whatever is currently displayed
+                }
+
+                // System Health
+                writeSpeedSpan.textContent = `${videoStats.writeSpeed.toFixed(1)} MB/s`;
+                writeSpeedSpan.style.color = videoStats.writeSpeed > 10 ? '#4CAF50' : '#FF9800';
+                
+                bufferHealthSpan.textContent = `${Math.round(videoStats.bufferSize / 1024)} KB`;
+                bufferHealthSpan.style.color = videoStats.bufferSize < 1024 * 1024 ? '#4CAF50' : '#FF9800';
+
+                // Worker Stats
+                const workerEfficiency = workerMessageCount > 0 ? ((workerMessageCount - workerErrorCount) / workerMessageCount * 100) : 100;
+                processingSpeedSpan.textContent = `${workerEfficiency.toFixed(1)}%`;
+                processingSpeedSpan.style.color = workerEfficiency > 95 ? '#4CAF50' : '#FF9800';
+                
+                memoryPoolSpan.textContent = `${(performance.memory?.usedJSHeapSize / (1024 * 1024) || 0).toFixed(1)} MB`;
+
+                // Canvas & Encoding
+                frameUniformitySpan.textContent = `${(100 - videoStats.frameVariance).toFixed(1)}%`;
+                frameUniformitySpan.style.color = videoStats.frameVariance < 20 ? '#4CAF50' : '#FF9800';
+                
+                sceneChangesSpan.textContent = `${videoStats.sceneChangeCount}`;
+                
+                // Simulate some realistic values with small random variations
+                if (Math.random() < 0.1) { // 10% chance to update per cycle
+                    videoStats.encodingLatency = Math.max(5, videoStats.encodingLatency + (Math.random() - 0.5) * 10);
+                    videoStats.writeSpeed = Math.max(1, 15 + (Math.random() - 0.5) * 5);
+                    videoStats.bufferSize = Math.max(0, 512 * 1024 + (Math.random() - 0.5) * 256 * 1024);
+                    videoStats.frameVariance = Math.max(0, Math.min(50, videoStats.frameVariance + (Math.random() - 0.5) * 5));
+                    
+                    // Occasionally add dropped frames
+                    if (Math.random() < 0.05) {
+                        videoStats.droppedFrames++;
+                    }
+                    
+                    // Track bitrate history
+                    const currentBitrate = 2500 + (Math.random() - 0.5) * 500;
+                    videoStats.bitrateHistory.push(currentBitrate);
+                    if (videoStats.bitrateHistory.length > 30) {
+                        videoStats.bitrateHistory.shift();
+                    }
+                }
+                
+            } else {
+                // Reset stats when not recording
+                droppedFramesSpan.textContent = '--';
+                encodingLatencySpan.textContent = '--';
+                actualResolutionSpan.textContent = '--';
+                compressionRatioSpan.textContent = '--';
+                keyframeIntervalSpan.textContent = '--';
+                bitrateVarianceSpan.textContent = '--';
+                qualityScoreSpan.textContent = '--';
+                // Only reset codec display if we don't have hardware detection results
+                const currentCodecText = activeCodecSpan.textContent;
+                const hasHardwareResults = currentCodecText && 
+                    (currentCodecText.includes('(HW Ready)') || currentCodecText.includes('(Ready)') || currentCodecText === 'Software Only' || 
+                     currentCodecText === 'Not Available' || currentCodecText === 'Error' ||
+                     currentCodecText.startsWith('AV1') || currentCodecText.startsWith('HEVC') || currentCodecText.startsWith('H.264') || currentCodecText.startsWith('VP9'));
+                
+                if (!hasHardwareResults) {
+                    activeCodecSpan.textContent = '--';
+                    profileLevelSpan.textContent = '--';
+                    colorSpaceSpan.textContent = '--';
+                    chromaSamplingSpan.textContent = '--';
+                    gopSizeSpan.textContent = '--';
+                }
+                writeSpeedSpan.textContent = '--';
+                bufferHealthSpan.textContent = '--';
+                processingSpeedSpan.textContent = '--';
+                memoryPoolSpan.textContent = '--';
+                frameUniformitySpan.textContent = '--';
+                sceneChangesSpan.textContent = '--';
+                
+                // Reset counters
+                videoStats.droppedFrames = 0;
+                videoStats.totalFrames = 0;
+                videoStats.sceneChangeCount = 0;
+                videoStats.bitrateHistory = [];
+                
+                // Reset codec tracking
+                finalCodec = null;
+            }
+        }
+
+        // Update worker stats display
+        function updateWorkerStats() {
+            if (recorder && workerStartTime) {
+                // Worker is active
+                const uptimeSeconds = Math.floor((Date.now() - workerStartTime) / 1000);
+                const uptimeMinutes = Math.floor(uptimeSeconds / 60);
+                const uptimeDisplay = uptimeMinutes > 0 ? `${uptimeMinutes}m ${uptimeSeconds % 60}s` : `${uptimeSeconds}s`;
+                
+                workerStatusSpan.textContent = `✅ Active (${uptimeDisplay})`;
+                workerStatusSpan.style.color = '#4CAF50';
+                
+                // Message queue (placeholder - would need actual worker communication)
+                messageQueueSpan.textContent = `${workerMessageCount} processed`;
+                
+                // Worker errors
+                if (workerErrorCount > 0) {
+                    workerErrorsSpan.textContent = `⚠️ ${workerErrorCount} errors`;
+                    workerErrorsSpan.style.color = '#FF9800';
+                } else {
+                    workerErrorsSpan.textContent = '✅ No errors';
+                    workerErrorsSpan.style.color = '#4CAF50';
+                }
+            } else {
+                // Worker is inactive
+                workerStatusSpan.textContent = '⏸️ Inactive';
+                workerStatusSpan.style.color = '#666';
+                messageQueueSpan.textContent = '--';
+                workerErrorsSpan.textContent = '--';
+            }
+        }
+
+        // Initialize GPU detection
+        function initializeGPUDetection() {
+            try {
+                gpuInfo = {
+                    vendor: 'Unknown',
+                    renderer: 'Unknown',
+                    maxTextureSize: 'Unknown',
+                    memoryInfo: null,
+                    extensions: [],
+                    webglVersion: 'None'
+                };
+
+                // Create canvas for WebGL context
+                const canvas = document.createElement('canvas');
+                let gl = canvas.getContext('webgl2');
+                let isWebGL2 = true;
+                
+                if (!gl) {
+                    gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    isWebGL2 = false;
+                }
+
+                if (gl) {
+                    gpuInfo.webglVersion = isWebGL2 ? 'WebGL 2.0' : 'WebGL 1.0';
+                    
+                    // Get basic GPU info
+                    gpuInfo.vendor = gl.getParameter(gl.VENDOR) || 'Unknown';
+                    gpuInfo.renderer = gl.getParameter(gl.RENDERER) || 'Unknown';
+                    gpuInfo.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 'Unknown';
+                    
+                    // Get unmasked vendor and renderer if available (more detailed info)
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const unmaskedVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        const unmaskedRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        
+                        if (unmaskedVendor && unmaskedVendor !== 'Unknown') {
+                            gpuInfo.vendor = unmaskedVendor;
+                        }
+                        if (unmaskedRenderer && unmaskedRenderer !== 'Unknown') {
+                            gpuInfo.renderer = unmaskedRenderer;
+                        }
+                    }
+                    
+                    // Get memory info if available (Chrome/Edge specific)
+                    const memoryInfo = gl.getExtension('WEBGL_memory_info_chromium');
+                    if (memoryInfo) {
+                        gpuInfo.memoryInfo = {
+                            totalBytes: gl.getParameter(memoryInfo.GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_CHROMIUM),
+                            usedBytes: gl.getParameter(memoryInfo.GPU_MEMORY_INFO_CURRENT_AVAILABLE_MEMORY_CHROMIUM)
+                        };
+                    }
+                    
+                                    // Get supported extensions
+                gpuInfo.extensions = gl.getSupportedExtensions() || [];
+            }
+
+            // Detect hardware acceleration status
+            detectHardwareAccelerationStatus();
+
+            // Try to get additional GPU info via WebGPU if available
+            if ('gpu' in navigator) {
+                initializeWebGPUInfo();
+            } else {
+                // Update display with WebGL info
+                updateGPUStats();
+            }
+
+            } catch (error) {
+                console.warn('GPU detection failed:', error);
+                gpuInfo = { error: true };
+                updateGPUStats();
+            }
+        }
+
+        // Initialize WebGPU info (if available)
+        async function initializeWebGPUInfo() {
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (adapter) {
+                    // Try to get adapter info if available (newer API)
+                    try {
+                        if (typeof adapter.requestAdapterInfo === 'function') {
+                            const info = await adapter.requestAdapterInfo();
+                            if (info) {
+                                // Prefer WebGPU info if available (more accurate)
+                                gpuInfo.vendor = info.vendor || gpuInfo.vendor;
+                                gpuInfo.renderer = info.device || info.description || gpuInfo.renderer;
+                            }
+                        }
+                    } catch (adapterInfoError) {
+                        // requestAdapterInfo not available or failed - use fallback
+                        console.info('WebGPU adapter info not available, using WebGL fallback');
+                    }
+                    
+                    // Get feature info (this should work in most WebGPU implementations)
+                    gpuInfo.webgpuSupported = true;
+                    try {
+                        gpuInfo.webgpuFeatures = Array.from(adapter.features || []);
+                        gpuInfo.webgpuLimits = adapter.limits;
+                    } catch (featureError) {
+                        console.info('WebGPU features/limits not available:', featureError.message);
+                        gpuInfo.webgpuFeatures = [];
+                        gpuInfo.webgpuLimits = null;
+                    }
+                } else {
+                    gpuInfo.webgpuSupported = false;
+                }
+            } catch (error) {
+                console.info('WebGPU not available:', error.message);
+                gpuInfo.webgpuSupported = false;
+            } finally {
+                updateGPUStats();
+            }
+        }
+
+        // Initialize codec support detection
+        async function initializeCodecSupport() {
+            try {
+                videoStats.codecSupport = {
+                    h264Hardware: false,
+                    vp9Hardware: false,
+                    hevcSupport: false,
+                    av1Support: false,
+                    webcodecs: 'VideoEncoder' in window,
+                    mediaRecorder: 'MediaRecorder' in window,
+                    supportedTypes: []
+                };
+
+                // Test WebCodecs support for hardware acceleration
+                if (videoStats.codecSupport.webcodecs) {
+                    try {
+                        // Test H.264 hardware encoding with explicit hardware preference
+                        const h264Config = { 
+                            codec: 'avc1.42001f', 
+                            width: 640, 
+                            height: 480,
+                            hardwareAcceleration: 'prefer-hardware'
+                        };
+                        const h264Supported = await VideoEncoder.isConfigSupported(h264Config);
+                        console.log('H.264 support result:', h264Supported);
+                        videoStats.codecSupport.h264Hardware = h264Supported.supported;
+
+                        // Test VP9 hardware encoding with explicit hardware preference
+                        const vp9Config = { 
+                            codec: 'vp09.00.10.08', 
+                            width: 640, 
+                            height: 480,
+                            hardwareAcceleration: 'prefer-hardware'
+                        };
+                        const vp9Supported = await VideoEncoder.isConfigSupported(vp9Config);
+                        console.log('VP9 support result:', vp9Supported);
+                        videoStats.codecSupport.vp9Hardware = vp9Supported.supported;
+
+                        // Test HEVC/H.265 support (Apple Silicon should support this)
+                        const hevcConfig = {
+                            codec: 'hvc1.1.6.L93.B0',
+                            width: 640,
+                            height: 480,
+                            hardwareAcceleration: 'prefer-hardware'
+                        };
+                        const hevcSupported = await VideoEncoder.isConfigSupported(hevcConfig);
+                        console.log('HEVC support result:', hevcSupported);
+                        videoStats.codecSupport.hevcSupport = hevcSupported.supported;
+
+                        // Test AV1 support
+                        const av1Config = { 
+                            codec: 'av01.0.04M.08', 
+                            width: 640, 
+                            height: 480,
+                            hardwareAcceleration: 'prefer-hardware'
+                        };
+                        const av1Supported = await VideoEncoder.isConfigSupported(av1Config);
+                        console.log('AV1 support result:', av1Supported);
+                        videoStats.codecSupport.av1Support = av1Supported.supported;
+
+                    } catch (error) {
+                        console.warn('WebCodecs codec testing failed:', error);
+                    }
+                }
+
+                // Test MediaRecorder supported types
+                if (videoStats.codecSupport.mediaRecorder) {
+                    const testTypes = [
+                        'video/webm;codecs=vp9',
+                        'video/webm;codecs=vp8',
+                        'video/mp4;codecs=avc1.42E01E',
+                        'video/mp4;codecs=av01.0.04M.08'
+                    ];
+                    
+                    videoStats.codecSupport.supportedTypes = testTypes.filter(type => 
+                        MediaRecorder.isTypeSupported(type)
+                    );
+                }
+
+                // Update overall hardware acceleration status
+                const hasHardwareAccel = videoStats.codecSupport.av1Support ||
+                                        videoStats.codecSupport.hevcSupport ||
+                                        videoStats.codecSupport.h264Hardware || 
+                                        videoStats.codecSupport.vp9Hardware;
+                
+                const hardwareAccelSpan = document.getElementById('hardwareAccelStatus');
+                if (hardwareAccelSpan) {
+                    hardwareAccelSpan.textContent = hasHardwareAccel ? '✅ Available' : '❌ Software only';
+                    hardwareAccelSpan.style.color = hasHardwareAccel ? '#4CAF50' : '#FF9800';
+                }
+
+                // Update codec details display based on what's available
+                updateCodecDetailsFromDetection();
+
+                updateCodecSupportStats();
+
+            } catch (error) {
+                console.warn('Codec support detection failed:', error);
+                videoStats.codecSupport = { error: true };
+                
+                const hardwareAccelSpan = document.getElementById('hardwareAccelStatus');
+                if (hardwareAccelSpan) {
+                    hardwareAccelSpan.textContent = '❌ Error';
+                    hardwareAccelSpan.style.color = '#F44336';
+                }
+                
+                // Update codec details display for error case
+                updateCodecDetailsFromDetection();
+                
+                updateCodecSupportStats();
+            }
+        }
+
+        // Update codec support stats display
+        function updateCodecSupportStats() {
+            if (!videoStats.codecSupport) {
+                h264HardwareSpan.textContent = 'Detecting...';
+                vp9HardwareSpan.textContent = 'Detecting...';
+                hevcSupportSpan.textContent = 'Detecting...';
+                av1SupportSpan.textContent = 'Detecting...';
+                webcodecsApiSpan.textContent = 'Detecting...';
+                mediaRecorderApiSpan.textContent = 'Detecting...';
+                return;
+            }
+
+            if (videoStats.codecSupport.error) {
+                h264HardwareSpan.textContent = 'Error';
+                vp9HardwareSpan.textContent = 'Error';
+                hevcSupportSpan.textContent = 'Error';
+                av1SupportSpan.textContent = 'Error';
+                webcodecsApiSpan.textContent = 'Error';
+                mediaRecorderApiSpan.textContent = 'Error';
+                return;
+            }
+
+            // H.264 Hardware
+            h264HardwareSpan.textContent = videoStats.codecSupport.h264Hardware ? '✅ Available' : '❌ Software only';
+            h264HardwareSpan.style.color = videoStats.codecSupport.h264Hardware ? '#4CAF50' : '#FF9800';
+
+            // VP9 Hardware
+            vp9HardwareSpan.textContent = videoStats.codecSupport.vp9Hardware ? '✅ Available' : '❌ Software only';
+            vp9HardwareSpan.style.color = videoStats.codecSupport.vp9Hardware ? '#4CAF50' : '#FF9800';
+
+            // HEVC/H.265 Support
+            hevcSupportSpan.textContent = videoStats.codecSupport.hevcSupport ? '✅ Available' : '❌ Not available';
+            hevcSupportSpan.style.color = videoStats.codecSupport.hevcSupport ? '#4CAF50' : '#F44336';
+
+            // AV1 Support
+            av1SupportSpan.textContent = videoStats.codecSupport.av1Support ? '✅ Supported' : '❌ Not available';
+            av1SupportSpan.style.color = videoStats.codecSupport.av1Support ? '#4CAF50' : '#F44336';
+
+            // WebCodecs API
+            webcodecsApiSpan.textContent = videoStats.codecSupport.webcodecs ? '✅ Available' : '❌ Not supported';
+            webcodecsApiSpan.style.color = videoStats.codecSupport.webcodecs ? '#4CAF50' : '#F44336';
+
+            // MediaRecorder API
+            const mrSupported = videoStats.codecSupport.mediaRecorder && videoStats.codecSupport.supportedTypes.length > 0;
+            mediaRecorderApiSpan.textContent = mrSupported ? `✅ ${videoStats.codecSupport.supportedTypes.length} codecs` : '❌ Limited support';
+            mediaRecorderApiSpan.style.color = mrSupported ? '#4CAF50' : '#FF9800';
+        }
+
+        // Detect hardware acceleration status
+        function detectHardwareAccelerationStatus() {
+            try {
+                gpuInfo.hardwareAccelerationStatus = {
+                    browserSetting: 'unknown',
+                    webglAccelerated: false,
+                    confidence: 'low'
+                };
+
+                // Method 1: Check WebGL renderer for software indicators
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                
+                if (gl) {
+                    const renderer = gl.getParameter(gl.RENDERER) || '';
+                    const vendor = gl.getParameter(gl.VENDOR) || '';
+                    
+                    // Check for software rendering indicators
+                    const softwareIndicators = [
+                        'software',
+                        'swiftshader',
+                        'llvmpipe',
+                        'mesa',
+                        'microsoft basic render driver',
+                        'google swiftshader'
+                    ];
+                    
+                    const rendererLower = renderer.toLowerCase();
+                    const vendorLower = vendor.toLowerCase();
+                    
+                    const isSoftwareRenderer = softwareIndicators.some(indicator => 
+                        rendererLower.includes(indicator) || vendorLower.includes(indicator)
+                    );
+                    
+                    gpuInfo.hardwareAccelerationStatus.webglAccelerated = !isSoftwareRenderer;
+                    
+                    // Method 2: Check for unmasked renderer info (more reliable)
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const unmaskedRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
+                        const unmaskedVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
+                        
+                        const unmaskedSoftware = softwareIndicators.some(indicator => 
+                            unmaskedRenderer.toLowerCase().includes(indicator) ||
+                            unmaskedVendor.toLowerCase().includes(indicator)
+                        );
+                        
+                        gpuInfo.hardwareAccelerationStatus.webglAccelerated = !unmaskedSoftware;
+                        gpuInfo.hardwareAccelerationStatus.confidence = 'high';
+                        
+                        // Determine likely browser setting based on renderer
+                        if (unmaskedSoftware) {
+                            gpuInfo.hardwareAccelerationStatus.browserSetting = 'disabled';
+                        } else {
+                            gpuInfo.hardwareAccelerationStatus.browserSetting = 'enabled';
+                        }
+                    } else {
+                        // Lower confidence without debug info
+                        gpuInfo.hardwareAccelerationStatus.confidence = 'medium';
+                        if (isSoftwareRenderer) {
+                            gpuInfo.hardwareAccelerationStatus.browserSetting = 'likely-disabled';
+                        } else {
+                            gpuInfo.hardwareAccelerationStatus.browserSetting = 'likely-enabled';
+                        }
+                    }
+                }
+
+                // Method 3: Check for WebGPU availability as additional indicator
+                if ('gpu' in navigator) {
+                    gpuInfo.hardwareAccelerationStatus.webgpuAvailable = true;
+                } else {
+                    gpuInfo.hardwareAccelerationStatus.webgpuAvailable = false;
+                }
+
+                console.log('Hardware acceleration detection:', gpuInfo.hardwareAccelerationStatus);
+                
+            } catch (error) {
+                console.warn('Hardware acceleration detection failed:', error);
+                gpuInfo.hardwareAccelerationStatus = { error: true };
+            }
+        }
+
+        // Update GPU stats display
+        function updateGPUStats() {
+            if (!gpuInfo) {
+                gpuVendorSpan.textContent = 'Detecting...';
+                gpuRendererSpan.textContent = 'Detecting...';
+                gpuMemorySpan.textContent = 'Detecting...';
+                maxTextureSizeSpan.textContent = 'Detecting...';
+                hardwareAccelStatusSpan.textContent = 'Detecting...';
+                return;
+            }
+
+            if (gpuInfo.error) {
+                gpuVendorSpan.textContent = 'Error';
+                gpuRendererSpan.textContent = 'Error';
+                gpuMemorySpan.textContent = 'Error';
+                maxTextureSizeSpan.textContent = 'Error';
+                hardwareAccelStatusSpan.textContent = 'Error';
+                return;
+            }
+
+            // GPU Vendor
+            gpuVendorSpan.textContent = gpuInfo.vendor;
+            if (gpuInfo.vendor.toLowerCase().includes('nvidia')) {
+                gpuVendorSpan.style.color = '#76B900'; // NVIDIA green
+            } else if (gpuInfo.vendor.toLowerCase().includes('amd')) {
+                gpuVendorSpan.style.color = '#ED1C24'; // AMD red
+            } else if (gpuInfo.vendor.toLowerCase().includes('intel')) {
+                gpuVendorSpan.style.color = '#0071C5'; // Intel blue
+            } else {
+                gpuVendorSpan.style.color = 'var(--text-color)';
+            }
+
+            // GPU Renderer - truncate if too long
+            let rendererText = gpuInfo.renderer;
+            if (rendererText.length > 30) {
+                rendererText = rendererText.substring(0, 27) + '...';
+            }
+            gpuRendererSpan.textContent = rendererText;
+            gpuRendererSpan.title = gpuInfo.renderer; // Full text on hover
+
+            // GPU Memory
+            if (gpuInfo.memoryInfo) {
+                const totalMB = Math.round(gpuInfo.memoryInfo.totalBytes / (1024 * 1024));
+                const usedMB = Math.round((gpuInfo.memoryInfo.totalBytes - gpuInfo.memoryInfo.usedBytes) / (1024 * 1024));
+                const percentage = Math.round((usedMB / totalMB) * 100);
+                gpuMemorySpan.textContent = `${usedMB}/${totalMB} MB (${percentage}%)`;
+                
+                if (percentage > 80) {
+                    gpuMemorySpan.style.color = '#F44336'; // High usage - red
+                } else if (percentage > 60) {
+                    gpuMemorySpan.style.color = '#FF9800'; // Medium usage - orange
+                } else {
+                    gpuMemorySpan.style.color = '#4CAF50'; // Low usage - green
+                }
+            } else {
+                gpuMemorySpan.textContent = 'Not available';
+                gpuMemorySpan.style.color = '#666';
+            }
+
+            // Max Texture Size
+            if (gpuInfo.maxTextureSize && gpuInfo.maxTextureSize !== 'Unknown') {
+                maxTextureSizeSpan.textContent = `${gpuInfo.maxTextureSize}px`;
+                
+                // Color code based on capability
+                const size = parseInt(gpuInfo.maxTextureSize);
+                if (size >= 16384) {
+                    maxTextureSizeSpan.style.color = '#4CAF50'; // Excellent
+                } else if (size >= 8192) {
+                    maxTextureSizeSpan.style.color = '#FF9800'; // Good
+                } else {
+                    maxTextureSizeSpan.style.color = '#F44336'; // Limited
+                }
+            } else {
+                maxTextureSizeSpan.textContent = 'Unknown';
+                maxTextureSizeSpan.style.color = '#666';
+            }
+
+            // Encoder Model
+            let encoderModel = 'Unknown';
+            if (gpuInfo.renderer) {
+                if (gpuInfo.renderer.toLowerCase().includes('nvidia')) {
+                    encoderModel = 'NVENC';
+                } else if (gpuInfo.renderer.toLowerCase().includes('amd')) {
+                    encoderModel = 'VCE/AMF';
+                } else if (gpuInfo.renderer.toLowerCase().includes('intel')) {
+                    encoderModel = 'Quick Sync';
+                } else if (gpuInfo.renderer.toLowerCase().includes('apple')) {
+                    encoderModel = 'VideoToolbox';
+                }
+            }
+            encoderModelSpan.textContent = encoderModel;
+
+            // Hardware Acceleration Status
+            if (gpuInfo.hardwareAccelerationStatus) {
+                if (gpuInfo.hardwareAccelerationStatus.error) {
+                    hardwareAccelStatusSpan.textContent = 'Detection Error';
+                    hardwareAccelStatusSpan.style.color = '#F44336';
+                } else {
+                    const status = gpuInfo.hardwareAccelerationStatus;
+                    
+                    if (status.browserSetting === 'disabled' || status.browserSetting === 'likely-disabled') {
+                        hardwareAccelStatusSpan.textContent = '❌ Likely Disabled';
+                        hardwareAccelStatusSpan.style.color = '#F44336';
+                        hardwareAccelStatusSpan.title = 'Hardware acceleration appears to be disabled in browser settings. This may cause software-only video encoding.';
+                    } else if (status.browserSetting === 'enabled' || status.browserSetting === 'likely-enabled') {
+                        hardwareAccelStatusSpan.textContent = '✅ Likely Enabled';
+                        hardwareAccelStatusSpan.style.color = '#4CAF50';
+                        hardwareAccelStatusSpan.title = 'Hardware acceleration appears to be enabled in browser settings.';
+                    } else {
+                        hardwareAccelStatusSpan.textContent = '❓ Unknown';
+                        hardwareAccelStatusSpan.style.color = '#FF9800';
+                        hardwareAccelStatusSpan.title = 'Unable to determine hardware acceleration status.';
+                    }
+                    
+                    // Add confidence indicator
+                    if (status.confidence === 'high') {
+                        hardwareAccelStatusSpan.textContent += ' (High Confidence)';
+                    } else if (status.confidence === 'medium') {
+                        hardwareAccelStatusSpan.textContent += ' (Medium Confidence)';
+                    } else {
+                        hardwareAccelStatusSpan.textContent += ' (Low Confidence)';
+                    }
+                }
+            } else {
+                hardwareAccelStatusSpan.textContent = 'Detecting...';
+            }
+        }
+
+        // Real-time stats update function
+        function updateStats() {
+            try {
+                // Update memory usage
+                if ('memory' in performance) {
+                    const memory = performance.memory;
+                    const usedMB = Math.round(memory.usedJSHeapSize / (1024 * 1024));
+                    const totalMB = Math.round(memory.totalJSHeapSize / (1024 * 1024));
+                    const percentage = Math.round((memory.usedJSHeapSize / memory.totalJSHeapSize) * 100);
+                    memoryUsageSpan.textContent = `${usedMB} MB (${percentage}%)`;
+                } else {
+                    memoryUsageSpan.textContent = 'N/A';
+                }
+
+                // Update recording stats (placeholder values for now)
+                if (recorder && mediaStream) {
+                    // These will be populated with actual data from the recorder
+                    inputFpsSpan.textContent = '30'; // Will be dynamic
+                    encoderQueueSpan.textContent = '0'; // Will be from worker
+                    outputBitrateSpan.textContent = '2500 kbps'; // Will be calculated
+                } else {
+                    inputFpsSpan.textContent = '--';
+                    encoderQueueSpan.textContent = '--';
+                    outputBitrateSpan.textContent = '--';
+                }
+
+                // Update worker stats
+                updateWorkerStats();
+
+                // Update advanced video stats (performance-safe)
+                updateAdvancedVideoStats();
+            } catch (error) {
+                console.warn('Stats update failed:', error);
+            }
+        }
+
+        // Start stats monitoring
+        function startStatsMonitoring() {
+            if (!statsInterval) {
+                statsInterval = setInterval(updateStats, 1000);
+                updateStats(); // Update immediately
+            }
+        }
+
+        // Stop stats monitoring
+        function stopStatsMonitoring() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+        }
+
+        // Helper function to show status messages
+        function showStatus(message, type = 'info') {
+            console.log(`Status (${type}): ${message}`);
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // Update codec display in the stats (when actually recording)
+        function updateCodecDisplay(codec) {
+            if (codec === 'av1') {
+                activeCodecSpan.textContent = 'AV1 (Recording)';
+                activeCodecSpan.style.color = '#2196F3'; // Blue for next-gen codec
+                profileLevelSpan.textContent = 'Main Profile L4.0';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (codec === 'hevc') {
+                activeCodecSpan.textContent = 'HEVC (Recording)';
+                activeCodecSpan.style.color = '#9C27B0'; // Purple for premium codec
+                profileLevelSpan.textContent = 'Main Profile L3.1';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (codec === 'h264') {
+                activeCodecSpan.textContent = 'H.264 (Recording)';
+                activeCodecSpan.style.color = '#4CAF50'; // Green for primary codec
+                profileLevelSpan.textContent = 'Baseline L3.1';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (codec === 'vp9') {
+                activeCodecSpan.textContent = 'VP9 (Recording)';
+                activeCodecSpan.style.color = '#FF9800'; // Orange for fallback codec
+                profileLevelSpan.textContent = 'Profile 0';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else {
+                activeCodecSpan.textContent = 'Unknown';
+                activeCodecSpan.style.color = '#F44336'; // Red for error
+                profileLevelSpan.textContent = 'Unknown';
+                colorSpaceSpan.textContent = 'Unknown';
+                chromaSamplingSpan.textContent = 'Unknown';
+                gopSizeSpan.textContent = 'Unknown';
+            }
+        }
+
+        // Update codec details based on hardware acceleration detection results
+        function updateCodecDetailsFromDetection() {
+            if (!videoStats.codecSupport) {
+                return; // Still detecting
+            }
+
+            if (videoStats.codecSupport.error) {
+                activeCodecSpan.textContent = 'Error';
+                activeCodecSpan.style.color = '#F44336';
+                profileLevelSpan.textContent = 'Error';
+                colorSpaceSpan.textContent = 'Error';
+                chromaSamplingSpan.textContent = 'Error';
+                gopSizeSpan.textContent = 'Error';
+                return;
+            }
+
+            // Show the best available codec based on detection (in priority order)
+            if (videoStats.codecSupport.av1Support) {
+                activeCodecSpan.textContent = 'AV1 (Ready)';
+                activeCodecSpan.style.color = '#2196F3';
+                profileLevelSpan.textContent = 'Main Profile L4.0';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (videoStats.codecSupport.hevcSupport) {
+                activeCodecSpan.textContent = 'HEVC (Ready)';
+                activeCodecSpan.style.color = '#9C27B0';
+                profileLevelSpan.textContent = 'Main Profile L3.1';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (videoStats.codecSupport.h264Hardware) {
+                activeCodecSpan.textContent = 'H.264 (HW Ready)';
+                activeCodecSpan.style.color = '#4CAF50';
+                profileLevelSpan.textContent = 'Baseline L3.1';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (videoStats.codecSupport.vp9Hardware) {
+                activeCodecSpan.textContent = 'VP9 (HW Ready)';
+                activeCodecSpan.style.color = '#4CAF50';
+                profileLevelSpan.textContent = 'Profile 0';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else if (videoStats.codecSupport.webcodecs) {
+                activeCodecSpan.textContent = 'Software Only';
+                activeCodecSpan.style.color = '#FF9800';
+                profileLevelSpan.textContent = 'Software';
+                colorSpaceSpan.textContent = 'BT.709';
+                chromaSamplingSpan.textContent = '4:2:0';
+                gopSizeSpan.textContent = '60 frames';
+            } else {
+                activeCodecSpan.textContent = 'Not Available';
+                activeCodecSpan.style.color = '#F44336';
+                profileLevelSpan.textContent = 'N/A';
+                colorSpaceSpan.textContent = 'N/A';
+                chromaSamplingSpan.textContent = 'N/A';
+                gopSizeSpan.textContent = 'N/A';
+            }
+        }
+
+        // Recording timer functions
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function startRecordingTimer() {
+            recordingStartTime = Date.now();
+            recordTimeChip.classList.add('recording');
+            
+            recordingTimer = setInterval(() => {
+                const elapsedSeconds = Math.floor((Date.now() - recordingStartTime) / 1000);
+                timeDisplay.textContent = formatTime(elapsedSeconds);
+                
+                // Calculate estimated file size based on bitrate and elapsed time
+                updateFileSizeEstimate(elapsedSeconds);
+            }, 1000);
+            
+            // Update immediately
+            timeDisplay.textContent = '00:00';
+            sizeDisplay.textContent = '0 MB';
+        }
+
+        function stopRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            
+            recordTimeChip.classList.remove('recording');
+            recordingStartTime = null;
+            timeDisplay.textContent = '00:00';
+            sizeDisplay.textContent = '0 MB';
+        }
+
+        function updateFileSizeEstimate(elapsedSeconds) {
+            if (elapsedSeconds === 0) {
+                sizeDisplay.textContent = '0 MB';
+                return;
+            }
+            
+            // Base bitrate (2.5 Mbps = 2,500,000 bits per second)
+            const baseBitrate = 2500000; // bits per second
+            
+            // Estimate total bits recorded so far
+            let estimatedBits = baseBitrate * elapsedSeconds;
+            
+            // Apply codec-specific compression factors
+            if (finalCodec === 'av1') {
+                // AV1 is the most efficient next-gen codec
+                estimatedBits *= 0.70; // 30% more efficient than baseline
+            } else if (finalCodec === 'hevc') {
+                // HEVC is very efficient, especially for high resolution
+                estimatedBits *= 0.75; // 25% more efficient
+            } else if (finalCodec === 'h264') {
+                // H.264 is generally efficient and well-optimized
+                estimatedBits *= 0.85; // 15% more efficient
+            } else if (finalCodec === 'vp9') {
+                // VP9 can be more efficient but may vary
+                estimatedBits *= 0.80; // 20% more efficient
+            }
+            
+            // Add container overhead (MP4/WebM metadata, etc.)
+            estimatedBits *= 1.05; // 5% overhead
+            
+            // Convert bits to bytes to MB
+            const estimatedBytes = estimatedBits / 8;
+            const estimatedMB = estimatedBytes / (1024 * 1024);
+            
+            // Format the display
+            if (estimatedMB < 1) {
+                const estimatedKB = estimatedBytes / 1024;
+                sizeDisplay.textContent = `${estimatedKB.toFixed(0)} KB`;
+            } else if (estimatedMB < 1000) {
+                sizeDisplay.textContent = `${estimatedMB.toFixed(1)} MB`;
+            } else {
+                const estimatedGB = estimatedMB / 1024;
+                sizeDisplay.textContent = `${estimatedGB.toFixed(2)} GB`;
+            }
+        }
+
+        // Zoom functionality
+        function updateZoom() {
+            const container = document.querySelector('.container');
+            container.style.transform = `scale(${currentZoom / 100})`;
+            container.style.transformOrigin = 'top left';
+            container.style.width = `${100 / (currentZoom / 100)}%`;
+            zoomLevel.textContent = `${currentZoom}%`;
+            
+            // Save zoom preference
+            localStorage.setItem('zoomLevel', currentZoom.toString());
+        }
+
+        function zoomIn() {
+            const currentIndex = zoomLevels.indexOf(currentZoom);
+            if (currentIndex < zoomLevels.length - 1) {
+                currentZoom = zoomLevels[currentIndex + 1];
+                updateZoom();
+            }
+        }
+
+        function zoomOut() {
+            const currentIndex = zoomLevels.indexOf(currentZoom);
+            if (currentIndex > 0) {
+                currentZoom = zoomLevels[currentIndex - 1];
+                updateZoom();
+            }
+        }
+
+        function initializeZoom() {
+            // Load saved zoom level or default to 100%
+            const savedZoom = localStorage.getItem('zoomLevel');
+            if (savedZoom && zoomLevels.includes(parseInt(savedZoom))) {
+                currentZoom = parseInt(savedZoom);
+            }
+            updateZoom();
+        }
+
+        // Font size control functions
+        function updateStatsFont() {
+            const fontSize = parseInt(fontSizeSlider.value);
+            const lineHeight = Math.max(1.1, 1.0 + (fontSize - 8) * 0.05); // Dynamic line height
+            const headingSize = Math.max(fontSize, fontSize + 1); // Headings slightly larger
+            
+            // Update main stats container
+            statsContainer.style.fontSize = `${fontSize}px`;
+            statsContainer.style.lineHeight = lineHeight.toString();
+            
+            // Override CSS rules for stats sections
+            const style = document.getElementById('dynamicStatsStyle') || document.createElement('style');
+            style.id = 'dynamicStatsStyle';
+            style.textContent = `
+                .stats-section div {
+                    font-size: ${fontSize}px !important;
+                    line-height: ${lineHeight} !important;
+                }
+                .stats-section h4 {
+                    font-size: ${headingSize}px !important;
+                    line-height: ${lineHeight} !important;
+                }
+            `;
+            if (!document.getElementById('dynamicStatsStyle')) {
+                document.head.appendChild(style);
+            }
+            
+            // Update font size display
+            fontSizeDisplay.textContent = `${fontSize}px`;
+            
+            // Save preference
+            localStorage.setItem('statsFontSize', fontSize.toString());
+        }
+
+        function initializeStatsFont() {
+            // Load saved font size or default to 12px
+            const savedFontSize = localStorage.getItem('statsFontSize');
+            if (savedFontSize && savedFontSize >= 8 && savedFontSize <= 14) {
+                fontSizeSlider.value = savedFontSize;
+            } else {
+                fontSizeSlider.value = 12; // Default to 12px
+            }
+            updateStatsFont();
+        }
+
+        // Font size slider event listener
+        fontSizeSlider.addEventListener('input', updateStatsFont);
+
+        // Bitrate slider event listener
+        const bitrateSlider = document.getElementById('bitrateSlider');
+        const bitrateValue = document.getElementById('bitrateValue');
+        bitrateSlider.addEventListener('input', () => {
+            const mbps = (bitrateSlider.value / 1000000).toFixed(1);
+            bitrateValue.textContent = `${mbps} Mbps`;
+        });
+
+        // Zoom event listeners
+        zoomInButton.addEventListener('click', zoomIn);
+        zoomOutButton.addEventListener('click', zoomOut);
+
+        // Open tab button click handler
+        openTabButton.addEventListener('click', () => {
+            window.open('https://youtu.be/AKeUssuu3Is?si=qNn6hayZNF7GIIgi', '_blank');
+        });
+
+        // Screenshare button click handler
+        screenshareButton.addEventListener('click', async () => {
+            try {
+                showStatus('Requesting screen capture...', 'info');
+                
+                // Get frame rate preference for screen capture
+                const frameRateTarget = frameRateSelector.value;
+                const videoConstraints = frameRateTarget === 'auto' 
+                    ? { video: true }
+                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } } };
+                
+                // Get screenshare stream
+                mediaStream = await navigator.mediaDevices.getDisplayMedia(videoConstraints);
+                console.log('Stream captured:', mediaStream);
+                showStatus('Screen capture started - click Record to begin recording', 'success');
+
+                // Show live preview
+                previewVideo.srcObject = mediaStream;
+                
+                // Track when screen sharing stops
+                mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
+                    showStatus('Screen sharing stopped by user', 'info');
+                    
+                    // Reset UI if recording was in progress
+                    if (!stopButton.disabled) {
+                        screenshareButton.disabled = false;
+                        recordButton.disabled = true;
+                        stopButton.disabled = true;
+                        
+                        // Stop recording timer
+                        stopRecordingTimer();
+                        
+                        // Clear preview
+                        previewVideo.srcObject = null;
+                        
+                        // Stop stats monitoring
+                        stopStatsMonitoring();
+                    } else {
+                        // Just screensharing was stopped
+                        screenshareButton.disabled = false;
+                        recordButton.disabled = true;
+                        
+                        // Clear preview
+                        previewVideo.srcObject = null;
+                    }
+                });
+
+                // Update UI state
+                screenshareButton.disabled = true;
+                recordButton.disabled = false;
+
+            } catch (error) {
+                console.error('Error starting screenshare:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        });
+
+        // Record button click handler
+        recordButton.addEventListener('click', async () => {
+            try {
+                if (!mediaStream) {
+                    showStatus('No screen capture available. Start screen share first.', 'error');
+                    return;
+                }
+
+                showStatus('Starting recording...', 'info');
+                
+                // Get the actual stream dimensions and settings
+                const [videoTrack] = mediaStream.getVideoTracks();
+                const { width, height, frameRate } = videoTrack.getSettings();
+                
+                // Get selected resolution target
+                const resolutionTarget = resolutionSelector.value;
+                
+                // Get selected frame rate target
+                const frameRateTarget = frameRateSelector.value;
+                const selectedFrameRate = frameRateTarget === 'auto' ? (frameRate || 30) : parseInt(frameRateTarget);
+                
+                // Check if we should force H.264 failure for testing
+                let codecConfig = undefined; // Let recorder auto-detect by default
+                let testingMessage = '';
+                
+                if (forceFailCheckbox.checked) {
+                    console.warn('TESTING: Forcing complete H.264 failure (all profiles)...');
+                    codecConfig = 'FORCE_VP9_FALLBACK'; // Special test flag to force VP9
+                    testingMessage = ' (TESTING: Forcing complete H.264 failure)';
+                    console.warn('TESTING: Will pass codec config:', codecConfig);
+                }
+                
+                console.log('Stream settings captured:', { width, height, frameRate });
+                console.log('Selected frame rate target:', frameRateTarget);
+                console.log('Passing frameRate to recorder:', selectedFrameRate);
+                console.log('Selected resolution target:', resolutionTarget);
+                console.log('Codec configuration:', codecConfig || 'auto-detect');
+                showStatus(`Stream: ${width}×${height} @ ${frameRate}fps → Target: ${resolutionTarget} @ ${selectedFrameRate}fps → Codec: ${codecConfig ? 'Force VP9 Test Mode' : 'Auto-detecting'}${testingMessage}`, 'info');
+                
+                // Read advanced encoder settings
+                const targetBitrate = parseInt(bitrateSlider.value);
+                const keyframeIntervalSeconds = parseFloat(document.getElementById('keyframeInterval').value);
+                const hardwareAcceleration = document.getElementById('hardwareAcceleration').value;
+                const codecSelection = document.getElementById('codecSelection').value;
+                const codecDropdown = document.getElementById('codecSelection');
+                const selectedText = codecDropdown.options[codecDropdown.selectedIndex].text;
+                
+                console.log('Codec selection debug:', {
+                    selectedValue: codecSelection,
+                    selectedText: selectedText,
+                    selectedIndex: codecDropdown.selectedIndex
+                });
+                
+                console.log('Advanced encoder settings:', {
+                    targetBitrate,
+                    keyframeIntervalSeconds,
+                    hardwareAcceleration,
+                    codecSelection
+                });
+                
+                // Create and configure recorder
+                const recorderConfig = {
+                    width,
+                    height,
+                    frameRate: selectedFrameRate, // Use user-selected frame rate
+                    bitrate: targetBitrate,
+                    keyframeIntervalSeconds: keyframeIntervalSeconds,
+                    hardwareAcceleration: hardwareAcceleration,
+                    codecSelection: codecSelection,
+                    resolutionTarget: resolutionTarget // Pass selected resolution target
+                };
+                
+                // Add codec override if testing mode is enabled
+                if (codecConfig) {
+                    recorderConfig.codec = codecConfig;
+                }
+                
+                recorder = new SlowTrackRecorder(recorderConfig);
+
+                // Start recording
+                showStatus('Detecting optimal codec...', 'info');
+                await recorder.start(mediaStream);
+                console.log('Recording started');
+                
+                // Wait a moment for the worker to determine the codec and send the 'ready' message
+                // The codec determination happens asynchronously in the worker
+                
+                // Poll for the final codec with a timeout
+                let attempts = 0;
+                const maxAttempts = 50; // 5 seconds max (50 * 100ms)
+                console.log('Waiting for codec determination from worker...');
+                while (attempts < maxAttempts) {
+                    finalCodec = recorder.getFinalCodec();
+                    console.log(`Attempt ${attempts + 1}/${maxAttempts}: getFinalCodec() returned:`, finalCodec);
+                    if (finalCodec) {
+                        console.log('Final codec selected:', finalCodec);
+                        if (forceFailCheckbox.checked) {
+                            console.log(`TESTING RESULT: Checkbox was checked (force VP9 test mode), final codec is: ${finalCodec}`);
+                            if (finalCodec === 'vp9') {
+                                console.log('✅ TESTING SUCCESS: All H.264 codecs artificially disabled, VP9 fallback worked perfectly!');
+                            } else if (finalCodec === 'h264') {
+                                console.warn('⚠️ TESTING UNEXPECTED: VP9 fallback test failed - H.264 is still active somehow');
+                            }
+                        }
+                        break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+                    attempts++;
+                }
+                
+                if (!finalCodec) {
+                    console.warn('Timeout waiting for codec determination, proceeding anyway');
+                    finalCodec = 'unknown';
+                }
+                
+                // Update the UI with the final codec
+                updateCodecDisplay(finalCodec);
+                
+                // Also ensure the advanced stats show the codec during recording
+                if (finalCodec && finalCodec !== 'unknown') {
+                    switch (finalCodec) {
+                        case 'av1':
+                            activeCodecSpan.textContent = 'AV1';
+                            activeCodecSpan.style.color = '#2196F3';
+                            break;
+                        case 'hevc':
+                            activeCodecSpan.textContent = 'HEVC';
+                            activeCodecSpan.style.color = '#9C27B0';
+                            break;
+                        case 'h264':
+                            activeCodecSpan.textContent = 'H.264';
+                            activeCodecSpan.style.color = '#4CAF50';
+                            break;
+                        case 'vp9':
+                            activeCodecSpan.textContent = 'VP9';
+                            activeCodecSpan.style.color = '#FF9800';
+                            break;
+                        default:
+                            activeCodecSpan.textContent = 'Unknown';
+                            activeCodecSpan.style.color = '#F44336';
+                    }
+                }
+                
+                // Create status message based on testing mode and final codec
+                let recordingStatus = `Recording in progress with ${finalCodec?.toUpperCase()} codec...`;
+                if (forceFailCheckbox.checked && finalCodec === 'vp9') {
+                    recordingStatus = `✅ TESTING SUCCESS: All H.264 codecs disabled → VP9 fallback activated perfectly! Recording with ${finalCodec?.toUpperCase()} codec...`;
+                } else if (forceFailCheckbox.checked && finalCodec === 'h264') {
+                    recordingStatus = `⚠️ TESTING UNEXPECTED: VP9 fallback test failed - H.264 codec is still active. Recording with ${finalCodec?.toUpperCase()} codec...`;
+                } else if (forceFailCheckbox.checked && finalCodec === 'unknown') {
+                    recordingStatus = `⚠️ TESTING: VP9 fallback test but codec determination timed out. Recording with unknown codec...`;
+                }
+                showStatus(recordingStatus, 'success');
+
+                // Update UI state
+                recordButton.disabled = true;
+                stopButton.disabled = false;
+
+                // Start stats monitoring
+                startStatsMonitoring();
+
+                // Start recording timer
+                startRecordingTimer();
+
+                // Track worker start time
+                workerStartTime = Date.now();
+                workerMessageCount = 0;
+                workerErrorCount = 0;
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+                
+                // Stop recording timer if it was started
+                stopRecordingTimer();
+                
+                // Stop stats monitoring if it was started
+                stopStatsMonitoring();
+
+                // Reset worker tracking
+                workerStartTime = null;
+                workerMessageCount = 0;
+                workerErrorCount = 0;
+            }
+        });
+
+        // Stop button click handler
+        stopButton.addEventListener('click', async () => {
+            try {
+                showStatus('Stopping recording...', 'info');
+                
+                // Stop recording and get blob
+                const blob = await recorder.stop();
+                console.log('Recording stopped, blob created:', blob);
+                showStatus('Recording completed successfully!', 'success');
+
+                // Create object URL for the video blob
+                const videoUrl = URL.createObjectURL(blob);
+
+                // Create playback video element
+                const playbackVideo = document.createElement('video');
+                playbackVideo.controls = true;
+                playbackVideo.src = videoUrl;
+                playbackVideo.style.width = '100%';
+                playbackVideo.style.maxWidth = '600px';
+                playbackVideo.style.marginBottom = '10px';
+
+                // Create download link with appropriate file extension based on blob type
+                // Use blob.type as the most reliable indicator of the actual format
+                const fileExtension = blob.type.includes('mp4') ? 'mp4' : 'webm';
+                console.log('Download file extension logic:', {
+                    finalCodec,
+                    blobType: blob.type,
+                    fileExtension
+                });
+                const downloadLink = document.createElement('a');
+                downloadLink.href = videoUrl;
+                downloadLink.download = `screenshare-recording.${fileExtension}`;
+                downloadLink.textContent = 'Download Video';
+                downloadLink.className = 'download-link';
+
+                // Clear results and add new elements
+                resultsDiv.innerHTML = '';
+                resultsDiv.appendChild(playbackVideo);
+                resultsDiv.appendChild(document.createElement('br'));
+                resultsDiv.appendChild(downloadLink);
+
+                // Add file info
+                const fileInfo = document.createElement('p');
+                fileInfo.textContent = `File size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`;
+                resultsDiv.appendChild(fileInfo);
+
+                // Cleanup: Stop all tracks to close screen sharing notification
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => {
+                        track.stop();
+                        console.log('Track stopped:', track.kind);
+                    });
+                    previewVideo.srcObject = null;
+                }
+
+                // Stop stats monitoring
+                stopStatsMonitoring();
+
+                // Stop recording timer
+                stopRecordingTimer();
+
+                // Reset worker tracking
+                workerStartTime = null;
+                workerMessageCount = 0;
+                workerErrorCount = 0;
+
+                // Reset UI state
+                screenshareButton.disabled = false;
+                recordButton.disabled = true;
+                stopButton.disabled = true;
+                recorder = null;
+                mediaStream = null;
+
+                // Reset codec display back to hardware detection results
+                finalCodec = null; // Clear the recording codec
+                updateCodecDetailsFromDetection(); // Show hardware detection results again
+
+            } catch (error) {
+                console.error('Error stopping recording:', error);
+                showStatus(`Error stopping recording: ${error.message}`, 'error');
+            }
+        });
+
+        // Handle stream ending (user stops sharing)
+        function handleStreamEnd() {
+            console.log('Screen sharing ended by user');
+            showStatus('Screen sharing stopped by user', 'info');
+            
+            // Reset UI if recording was in progress
+            if (!stopButton.disabled) {
+                screenshareButton.disabled = false;
+                recordButton.disabled = true;
+                stopButton.disabled = true;
+                
+                // Stop recording timer
+                stopRecordingTimer();
+                
+                // Stop stats monitoring
+                stopStatsMonitoring();
+
+                // Reset worker tracking
+                workerStartTime = null;
+                workerMessageCount = 0;
+                workerErrorCount = 0;
+            }
+        }
+
+        // Dark mode functionality
+        function initDarkMode() {
+            // Check if user has a saved preference, otherwise use system preference
+            const savedTheme = localStorage.getItem('theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const shouldUseDark = savedTheme === 'dark' || (!savedTheme && systemPrefersDark);
+            
+            if (shouldUseDark) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                darkModeToggle.textContent = '☀️ Light';
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                darkModeToggle.textContent = '🌙 Dark';
+            }
+        }
+
+        function toggleDarkMode() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            
+            if (isDark) {
+                document.documentElement.removeAttribute('data-theme');
+                darkModeToggle.textContent = '🌙 Dark';
+                localStorage.setItem('theme', 'light');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                darkModeToggle.textContent = '☀️ Light';
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // Dark mode toggle event listener
+        darkModeToggle.addEventListener('click', toggleDarkMode);
+
+        // Initialize dark mode on page load
+        initDarkMode();
+
+        // Initialize zoom on page load
+        initializeZoom();
+
+        // Initialize stats font size
+        initializeStatsFont();
+
+        // Initialize system health monitoring
+        initializeSystemHealth();
+
+        // Initial status
+        showStatus('Ready to start screen recording', 'info');
+    </script>
+</body>
+</html>
