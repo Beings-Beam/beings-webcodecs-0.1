@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beings WebCodecs 0.1 - Screen Recording Library</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 2rem;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .feature {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .feature h3 {
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+        
+        .demo-button {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin: 1rem;
+        }
+        
+        .demo-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .github-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .github-link:hover {
+            text-decoration: underline;
+        }
+        
+        .warning {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Beings WebCodecs 0.1</h1>
+        <p class="subtitle">High-fidelity screen recording with 4K and high frame rate support</p>
+        
+        <div class="features">
+            <div class="feature">
+                <h3>🎯 4K Recording</h3>
+                <p>Record in ultra-high definition up to 3840×2160 resolution</p>
+            </div>
+            <div class="feature">
+                <h3>⚡ High Frame Rate</h3>
+                <p>Smooth 60fps recording for fluid motion capture</p>
+            </div>
+            <div class="feature">
+                <h3>🚀 WebCodecs</h3>
+                <p>Modern browser API for superior encoding performance</p>
+            </div>
+            <div class="feature">
+                <h3>🔧 Multi-Codec</h3>
+                <p>AV1, HEVC, H.264, VP9 with intelligent fallback</p>
+            </div>
+        </div>
+        
+        <div class="warning">
+            <strong>⚠️ Browser Requirements:</strong> This demo requires a modern Chromium-based browser (Chrome 94+, Edge 94+) with WebCodecs support enabled.
+        </div>
+        
+        <a href="packages/@beings/core/manual-test.html" class="demo-button">
+            🚀 Launch Live Demo
+        </a>
+        
+        <p style="margin-top: 2rem;">
+            <a href="https://github.com/davejohnstone/beings-webcodecs-0.1" class="github-link">
+                📚 View on GitHub
+            </a>
+        </p>
+        
+        <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(0,0,0,0.1); color: #666; font-size: 0.9rem;">
+            Framework-agnostic • TypeScript • MIT License
+        </div>
+    </div>
+</body>
+</html>
