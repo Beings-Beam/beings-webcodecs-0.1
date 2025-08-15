@@ -589,7 +589,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       // AV1 codec - use WebM muxer
       console.log('Worker: Using WebM muxer for AV1 codec', audioEnabled ? 'with audio' : 'video-only');
       const muxerConfig: any = {
-        target: (data) => {
+        target: (data: any) => {
           muxedChunks.push(data);
         },
         video: {
@@ -667,7 +667,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       // VP9 codec - use WebM muxer
       console.log('Worker: Using WebM muxer for VP9 codec', audioEnabled ? 'with audio' : 'video-only');
       const muxerConfig: any = {
-        target: (data) => {
+        target: (data: any) => {
           muxedChunks.push(data);
         },
         video: {
