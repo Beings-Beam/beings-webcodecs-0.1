@@ -310,7 +310,7 @@ export class SlowTrackRecorder {
 
       // Initialize Worker: Create new worker instance
       this.#worker = new Worker(
-        new URL('./recorder.worker.ts', import.meta.url), 
+        new URL('./recorder.worker.js', import.meta.url), 
         { type: 'module' }
       );
 
