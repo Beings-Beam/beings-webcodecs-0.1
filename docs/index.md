@@ -1,6 +1,6 @@
 # Beings Recorder Documentation
 
-The **Beings Recorder** is a secure, high-fidelity capture tool designed to create the definitive source of truth for qualitative research by prioritising accuracy and data integrity.
+The **Beings Recorder** is a secure, high-fidelity video and audio capture tool designed to create the definitive source of truth for qualitative research by prioritising accuracy and data integrity.
 
 This repository follows a **"Docs-as-Code"** approach, keeping all documentation version-controlled alongside the codebase to ensure consistency and maintainability.
 

@@ -531,8 +531,6 @@
         <div class="sections-grid">
             <div class="section main-section">
                 <h2>Live Preview</h2>
-                <video id="preview" autoplay muted playsinline></video>
-                <div id="status"></div>
                 <div class="controls">
                     <div style="margin-bottom: 16px;">
                         <label for="resolutionSelector" style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-color);">Recording Resolution:</label>
@@ -652,25 +650,28 @@
                         <!-- Audio Enable Control -->
                         <div style="margin-bottom: 16px;">
                             <label for="audioEnabledCheckbox" style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text-color); cursor: pointer; font-size: 12px;">
-                                <input type="checkbox" id="audioEnabledCheckbox" checked style="margin: 0;">
+                                <input type="checkbox" id="audioEnabledCheckbox" style="margin: 0;">
                                 <span>Enable Audio Recording</span>
                             </label>
                             <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 24px;">Capture microphone audio along with screen recording</span>
                         </div>
 
-                        <!-- Audio Codec Information -->
+                        <!-- Audio Codec Selection Control -->
                         <div style="margin-bottom: 0;">
-                            <div style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); font-size: 12px;">
-                                <div style="font-weight: 500; color: var(--text-color); margin-bottom: 4px;">
-                                    Audio Codec: <span id="audioCodecDisplay" style="color: #4CAF50;">Auto-selected</span>
-                                </div>
-                                <div id="audioCodecInfo" style="font-size: 11px; color: var(--text-color); opacity: 0.7;">
-                                    Audio codec automatically selected (AAC for MP4, Opus for WebM)
-                                </div>
-                            </div>
+                            <label for="audioCodecSelector" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Audio Codec:
+                            </label>
+                            <select id="audioCodecSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                                <option value="opus">Opus (for WebM)</option>
+                                <option value="aac">AAC (for MP4)</option>
+                                <option value="flac">FLAC (for WebM)</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Codec compatibility depends on video container format</span>
                         </div>
                     </div>
                 </div>
+                <video id="preview" autoplay muted playsinline></video>
+                <div id="status"></div>
             </div>
             
             <div class="section sidebar-section">
@@ -695,8 +696,6 @@
                     <div class="stats-section">
                         <h4>Stream Quality</h4>
                         <div>Actual Resolution: <span id="actualResolution">--</span></div>
-                        <div>Video Input: <span id="videoInput">--</span></div>
-                        <div>Audio Input: <span id="audioInput">--</span></div>
                         <div>Compression Ratio: <span id="compressionRatio">--</span></div>
                         <div>Keyframe Interval: <span id="keyframeInterval">--</span></div>
                         <div>Bitrate Variance: <span id="bitrateVariance">--</span></div>
@@ -771,7 +770,7 @@
     </div></body>
 
     <script type="module">
-        import { SlowTrackRecorder } from './src/index.ts';
+        import { SlowTrackRecorder } from './dist/index.js';
 
         // Get DOM element references
         const openTabButton = document.getElementById('openTabButton');
@@ -823,8 +822,6 @@
         const droppedFramesSpan = document.getElementById('droppedFrames');
         const encodingLatencySpan = document.getElementById('encodingLatency');
         const actualResolutionSpan = document.getElementById('actualResolution');
-        const videoInputSpan = document.getElementById('videoInput');
-        const audioInputSpan = document.getElementById('audioInput');
         const compressionRatioSpan = document.getElementById('compressionRatio');
         const keyframeIntervalSpan = document.getElementById('keyframeInterval');
         const bitrateVarianceSpan = document.getElementById('bitrateVariance');
@@ -2137,49 +2134,6 @@
                 // Get screenshare stream
                 mediaStream = await navigator.mediaDevices.getDisplayMedia(constraints);
                 console.log('Stream captured:', mediaStream);
-                
-                // Update video input stats from captured stream
-                const videoTrack = mediaStream.getVideoTracks()[0];
-                if (videoTrack) {
-                    const settings = videoTrack.getSettings();
-                    const videoInputSpan = document.getElementById('videoInput');
-                    if (videoInputSpan && settings.width && settings.height && settings.frameRate) {
-                        videoInputSpan.textContent = `${settings.width}×${settings.height} @ ${settings.frameRate}fps`;
-                        videoInputSpan.style.color = '#4CAF50';
-                    }
-                }
-                
-                // Update audio input stats from captured stream
-                const audioTrack = mediaStream.getAudioTracks()[0];
-                const audioInputSpan = document.getElementById('audioInput');
-                if (audioInputSpan) {
-                    if (audioTrack) {
-                        const settings = audioTrack.getSettings();
-                        const videoCodec = document.getElementById('codecSelection').value;
-                        const audioCodec = getAudioCodecForVideoCodec(videoCodec).toUpperCase();
-                        const sampleRate = settings.sampleRate ? `${settings.sampleRate/1000}kHz` : '48kHz';
-                        const channelCount = settings.channelCount || 2;
-                        const channelLabel = channelCount === 1 ? 'Mono' : channelCount === 2 ? 'Stereo' : `${channelCount}ch`;
-                        const bitrate = channelCount === 1 ? '64kbps' : '128kbps';
-                        
-                        audioInputSpan.textContent = `${audioCodec} ${sampleRate} ${channelLabel} @ ${bitrate}`;
-                        audioInputSpan.style.color = '#4CAF50';
-                        
-                        // Add visual indicator for channel type
-                        if (channelCount === 1) {
-                            audioInputSpan.style.borderLeft = '3px solid #FF9800'; // Orange for mono
-                        } else {
-                            audioInputSpan.style.borderLeft = '3px solid #4CAF50'; // Green for stereo
-                        }
-                        audioInputSpan.style.paddingLeft = '8px';
-                    } else {
-                        audioInputSpan.textContent = 'Disabled';
-                        audioInputSpan.style.color = '#757575';
-                        audioInputSpan.style.borderLeft = 'none';
-                        audioInputSpan.style.paddingLeft = '0';
-                    }
-                }
-                
                 showStatus('Screen capture started - click Record to begin recording', 'success');
 
                 // Show live preview
@@ -2261,21 +2215,11 @@
                 console.log('Selected resolution target:', resolutionTarget);
                 console.log('Codec configuration:', codecConfig || 'auto-detect');
                 
-                // Update video input stats display
-                const videoInputSpan = document.getElementById('videoInput');
-                if (videoInputSpan) {
-                    videoInputSpan.textContent = `${width}×${height} @ ${frameRate}fps`;
-                    videoInputSpan.style.color = '#4CAF50';
-                }
-                
                 // Check audio settings for logging and status
                 const audioEnabled = document.getElementById('audioEnabledCheckbox').checked;
                 console.log('Audio enabled:', audioEnabled);
                 
-                // Determine audio codec based on video codec selection
-                const videoCodecValue = document.getElementById('codecSelection').value;
-                const audioCodecValue = getAudioCodecForVideoCodec(videoCodecValue);
-                const audioStatusText = audioEnabled ? ` + Audio (${audioCodecValue.toUpperCase()})` : ' (Video Only)';
+                const audioStatusText = audioEnabled ? ` + Audio (${document.getElementById('audioCodecSelector').value.toUpperCase()})` : ' (Video Only)';
                 showStatus(`Stream: ${width}×${height} @ ${frameRate}fps → Target: ${resolutionTarget} @ ${selectedFrameRate}fps${audioStatusText} → Codec: ${codecConfig ? 'Force VP9 Test Mode' : 'Auto-detecting'}${testingMessage}`, 'info');
                 
                 // Read advanced encoder settings
@@ -2318,54 +2262,15 @@
                 
                 // Add audio configuration if audio is enabled
                 if (audioEnabled) {
-                    const audioCodec = getAudioCodecForVideoCodec(videoCodecValue);
-                    console.log('Using audio codec:', audioCodec, 'for video codec:', videoCodecValue);
-                    
-                    // Detect actual audio format from captured stream
-                    const audioTrack = mediaStream.getAudioTracks()[0];
-                    const audioSettings = audioTrack ? audioTrack.getSettings() : {};
-                    const actualChannels = audioSettings.channelCount || 1; // Default to mono if unknown
-                    const actualSampleRate = audioSettings.sampleRate || 48000; // Default to 48kHz if unknown
-                    
-                    console.log('Detected audio stream format:', {
-                        channelCount: actualChannels,
-                        sampleRate: actualSampleRate,
-                        settings: audioSettings
-                    });
-                    
+                    const audioCodec = document.getElementById('audioCodecSelector').value;
                     recorderConfig.audio = {
                         enabled: true,
                         codec: audioCodec,
-                        sampleRate: actualSampleRate,
-                        numberOfChannels: actualChannels,  // Use actual detected channels
-                        bitrate: actualChannels === 1 ? 64000 : 128000  // Lower bitrate for mono
+                        sampleRate: 48000,      // Sensible default: 48kHz
+                        numberOfChannels: 2,    // Sensible default: Stereo
+                        bitrate: 128000         // Sensible default: 128kbps
                     };
                     console.log('Audio configuration:', recorderConfig.audio);
-                    
-                    // Update audio input stats display with detected format
-                    const audioInputSpan = document.getElementById('audioInput');
-                    if (audioInputSpan) {
-                        const channelLabel = actualChannels === 1 ? 'Mono' : actualChannels === 2 ? 'Stereo' : `${actualChannels}ch`;
-                        audioInputSpan.textContent = `${audioCodec.toUpperCase()} ${actualSampleRate/1000}kHz ${channelLabel} @ ${recorderConfig.audio.bitrate/1000}kbps`;
-                        audioInputSpan.style.color = '#4CAF50';
-                        
-                        // Add a visual indicator for mono vs stereo
-                        if (actualChannels === 1) {
-                            audioInputSpan.style.borderLeft = '3px solid #FF9800'; // Orange for mono
-                        } else {
-                            audioInputSpan.style.borderLeft = '3px solid #4CAF50'; // Green for stereo
-                        }
-                        audioInputSpan.style.paddingLeft = '8px';
-                    }
-                } else {
-                    // Update audio input stats display for no audio
-                    const audioInputSpan = document.getElementById('audioInput');
-                    if (audioInputSpan) {
-                        audioInputSpan.textContent = 'Disabled';
-                        audioInputSpan.style.color = '#757575';
-                        audioInputSpan.style.borderLeft = 'none';
-                        audioInputSpan.style.paddingLeft = '0px';
-                    }
                 }
                 
                 recorder = new SlowTrackRecorder(recorderConfig);
@@ -2617,111 +2522,6 @@
         // Dark mode toggle event listener
         darkModeToggle.addEventListener('click', toggleDarkMode);
 
-        // ===== CODEC COMPATIBILITY SYSTEM =====
-
-        /**
-         * Codec compatibility mapping for video and audio combinations
-         */
-        const codecCompatibility = {
-            // WebM containers support these audio codecs
-            webm: ['none', 'opus', 'flac'],
-            // MP4 containers support these audio codecs  
-            mp4: ['none', 'aac']
-        };
-
-        /**
-         * Map video codec selections to their container types
-         */
-        const videoCodecToContainer = {
-            'auto': 'both', // Auto-detect can use either container
-            'av1': 'webm',
-            'vp9': 'webm', 
-            'hevc': 'mp4',
-            'h264': 'mp4'
-        };
-
-        /**
-         * Get the appropriate audio codec for a given video codec selection
-         * @param {string} videoCodec - Selected video codec ('auto', 'av1', 'vp9', 'hevc', 'h264')
-         * @returns {string} The audio codec to use
-         */
-        function getAudioCodecForVideoCodec(videoCodec) {
-            const containerType = videoCodecToContainer[videoCodec];
-            
-            if (containerType === 'both') {
-                // Auto-detect mode: backend will choose appropriate codec
-                return 'auto';
-            } else if (containerType === 'webm') {
-                return 'opus';
-            } else if (containerType === 'mp4') {
-                return 'aac';
-            }
-            
-            // Fallback
-            return 'auto';
-        }
-
-        /**
-         * Update the audio codec display based on video codec selection
-         */
-        function updateAudioCodecDisplay() {
-            const videoCodecSelect = document.getElementById('codecSelection');
-            const audioCodecDisplay = document.getElementById('audioCodecDisplay');
-            const audioCodecInfo = document.getElementById('audioCodecInfo');
-            
-            if (!videoCodecSelect || !audioCodecDisplay || !audioCodecInfo) {
-                console.warn('Audio codec display elements not found');
-                return;
-            }
-            
-            const selectedVideoCodec = videoCodecSelect.value;
-            const containerType = videoCodecToContainer[selectedVideoCodec];
-            
-            // Update the display based on video codec selection
-            if (containerType === 'both') {
-                // Auto-detect mode
-                audioCodecDisplay.textContent = 'Auto-selected';
-                audioCodecDisplay.style.color = '#2196F3';
-                audioCodecInfo.textContent = 'Audio codec automatically selected (AAC for MP4, Opus for WebM)';
-            } else if (containerType === 'webm') {
-                // WebM container
-                audioCodecDisplay.textContent = 'Opus';
-                audioCodecDisplay.style.color = '#4CAF50';
-                audioCodecInfo.textContent = 'Opus codec selected for WebM container';
-            } else if (containerType === 'mp4') {
-                // MP4 container
-                audioCodecDisplay.textContent = 'AAC';
-                audioCodecDisplay.style.color = '#4CAF50';
-                audioCodecInfo.textContent = 'AAC codec selected for MP4 container';
-            } else {
-                // Fallback
-                audioCodecDisplay.textContent = 'Auto-selected';
-                audioCodecDisplay.style.color = '#4CAF50';
-                audioCodecInfo.textContent = 'Audio codec automatically selected based on video format';
-            }
-        }
-
-
-
-        /**
-         * Initialize the codec compatibility system
-         */
-        function initializeCodecCompatibility() {
-            const videoCodecSelect = document.getElementById('codecSelection');
-            
-            if (videoCodecSelect) {
-                // Add event listener for video codec changes
-                videoCodecSelect.addEventListener('change', updateAudioCodecDisplay);
-                
-                // Initialize with current selection
-                updateAudioCodecDisplay();
-                
-                console.log('Codec compatibility system initialized');
-            } else {
-                console.warn('Video codec selector not found - codec compatibility disabled');
-            }
-        }
-
         // Initialize dark mode on page load
         initDarkMode();
 
@@ -2733,9 +2533,6 @@
 
         // Initialize system health monitoring
         initializeSystemHealth();
-
-        // Initialize codec compatibility system
-        initializeCodecCompatibility();
 
         // Initial status
         showStatus('Ready to start screen recording', 'info');

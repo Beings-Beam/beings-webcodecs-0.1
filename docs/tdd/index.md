@@ -9,7 +9,7 @@ This directory contains detailed technical specifications and design documents f
 - **[Requirements Traceability](./requirements-traceability.md)** - Mapping between PRD requirements and technical implementation
 
 ### Media Processing
-- **[Audio Capture & Processing](./audio-capture.md)** - WAV/FLAC recording, encoding, and quality requirements
+- **[Audio Capture & Processing](./audio-capture.md)** - WebCodecs AudioEncoder implementation with intelligent codec selection, channel upmixing, and sample rate preservation
 - **[Video Capture & Processing](./video-capture.md)** - WebCodecs implementation and MediaRecorder fallbacks
 - **[Screen Capture Specification](./screen-capture.md)** - getDisplayMedia implementation and system audio handling
 

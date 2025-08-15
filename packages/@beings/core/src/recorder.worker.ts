@@ -8,20 +8,27 @@
  * with mp4-muxer and webm-muxer for container creation.
  */
 
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import WebMMuxer from 'webm-muxer';
+// Dynamic imports to avoid worker loading issues
+// import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+// import WebMMuxer from 'webm-muxer';
 import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig } from './types';
 
 // Module-level state variables
 let videoEncoder: VideoEncoder | null = null;
-let muxer: Muxer<ArrayBufferTarget> | WebMMuxer | null = null;
-let mp4Target: ArrayBufferTarget | null = null; // Store MP4 target separately
+let muxer: any | null = null; // Will be Muxer<ArrayBufferTarget> | WebMMuxer after dynamic import
+let mp4Target: any | null = null; // Will be ArrayBufferTarget after dynamic import
 let streamReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
 let currentCodec: string | null = null;
 
 // Audio pipeline state variables
 let audioEncoder: AudioEncoder | null = null;
 let audioStreamReader: ReadableStreamDefaultReader<AudioData> | null = null;
+
+// Audio upmixing state
+let needsUpmixing = false;
+let originalStreamChannels = 0;
+let finalEncoderChannels = 0;
+let currentAudioConfig: AudioEncoderConfig | null = null;
 
 // Downscaling state variables
 let needsScaling = false;
@@ -129,6 +136,60 @@ function determineTargetResolution(
 }
 
 /**
+ * Upmix mono audio to stereo by duplicating the mono channel to both left and right channels
+ * 
+ * @param monoAudioData - The mono AudioData frame to be upmixed
+ * @returns New stereo AudioData frame with duplicated channels
+ */
+function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
+  try {
+    // Verify input is actually mono
+    if (monoAudioData.numberOfChannels !== 1) {
+      throw new Error(`Expected mono audio (1 channel), got ${monoAudioData.numberOfChannels} channels`);
+    }
+    
+    const sampleRate = monoAudioData.sampleRate;
+    const numberOfFrames = monoAudioData.numberOfFrames;
+    const timestamp = monoAudioData.timestamp;
+    const duration = monoAudioData.duration;
+    
+    // Calculate buffer size for stereo (2 channels)
+    const stereoBufferSize = numberOfFrames * 2; // 2 channels
+    
+    // Create stereo buffer
+    const stereoBuffer = new Float32Array(stereoBufferSize);
+    
+    // Copy mono data to a temporary buffer
+    const monoBuffer = new Float32Array(numberOfFrames);
+    monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
+    
+    // Duplicate mono samples to both stereo channels (interleaved format)
+    for (let i = 0; i < numberOfFrames; i++) {
+      const sample = monoBuffer[i];
+      stereoBuffer[i * 2] = sample;     // Left channel
+      stereoBuffer[i * 2 + 1] = sample; // Right channel
+    }
+    
+    // Create new stereo AudioData frame
+    const stereoAudioData = new AudioData({
+      format: 'f32-planar', // Use planar format for better compatibility
+      sampleRate: sampleRate,
+      numberOfChannels: 2,
+      numberOfFrames: numberOfFrames,
+      timestamp: timestamp,
+      data: stereoBuffer
+    });
+    
+    console.log(`Worker: Upmixed mono to stereo - ${numberOfFrames} frames @ ${sampleRate}Hz`);
+    return stereoAudioData;
+    
+  } catch (error) {
+    console.error('Worker: Error in upmixMonoToStereo:', error);
+    throw error;
+  }
+}
+
+/**
  * Process a video frame through downscaling using OffscreenCanvas
  * 
  * @param originalFrame - The high-resolution VideoFrame to be scaled down
@@ -161,26 +222,127 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
 }
 
 /**
+ * Dynamically import and create MP4 muxer
+ */
+async function createMP4Muxer(config: any) {
+  const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({ ...config, target });
+  return { muxer, target };
+}
+
+/**
+ * Dynamically import and create WebM muxer
+ */
+async function createWebMMuxer(config: any) {
+  const WebMMuxer = (await import('webm-muxer')).default;
+  const muxer = new WebMMuxer(config);
+  return muxer;
+}
+
+/**
+ * Check video codec support with a timeout to prevent hanging on problematic codec checks
+ * 
+ * @param config - VideoEncoder configuration to test
+ * @param timeout - Timeout in milliseconds (default: 2000ms)
+ * @returns Promise that resolves with config support result or rejects on timeout
+ */
+async function checkVideoSupportWithTimeout(
+  config: VideoEncoderConfig, 
+  timeout = 2000
+): Promise<VideoEncoderSupport> {
+  console.log(`Worker: 🔍 Starting codec support check with ${timeout}ms timeout for:`, config.codec);
+  return new Promise((resolve, reject) => {
+    // Create timeout promise that rejects after specified time
+    const timeoutPromise = new Promise<never>((_, timeoutReject) => {
+      setTimeout(() => {
+        console.log(`Worker: ⏱️ TIMEOUT TRIGGERED for codec ${config.codec} after ${timeout}ms`);
+        timeoutReject(new Error(`Codec support check timeout after ${timeout}ms`));
+      }, timeout);
+    });
+
+    // Race the actual support check against the timeout
+    Promise.race([VideoEncoder.isConfigSupported(config), timeoutPromise])
+      .then((result) => {
+        console.log(`Worker: ✅ Codec support check completed for ${config.codec}:`, result);
+        resolve(result);
+      })
+      .catch((error) => {
+        console.log(`Worker: ❌ Codec support check failed for ${config.codec}:`, error.message);
+        reject(error);
+      });
+  });
+}
+
+/**
+ * Check audio codec support with a timeout to prevent hanging on problematic codec checks
+ * 
+ * @param config - AudioEncoder configuration to test
+ * @param timeout - Timeout in milliseconds (default: 2000ms)
+ * @returns Promise that resolves with config support result or rejects on timeout
+ */
+async function checkAudioSupportWithTimeout(
+  config: AudioEncoderConfig, 
+  timeout = 2000
+): Promise<AudioEncoderSupport> {
+  return new Promise((resolve, reject) => {
+    // Create timeout promise that rejects after specified time
+    const timeoutPromise = new Promise<never>((_, timeoutReject) => {
+      setTimeout(() => {
+        timeoutReject(new Error(`Codec support check timeout after ${timeout}ms`));
+      }, timeout);
+    });
+
+    // Race the actual support check against the timeout
+    Promise.race([AudioEncoder.isConfigSupported(config), timeoutPromise])
+      .then(resolve)
+      .catch(reject);
+  });
+}
+
+/**
  * Setup and configure the AudioEncoder for the given audio configuration
  * 
  * @param audioConfig - Audio configuration from the main thread
  * @param containerType - Container type ('mp4' or 'webm') to determine codec compatibility
+ * @param originalSampleRate - Original sample rate from the audio stream
  */
-async function setupAudioEncoder(audioConfig: AudioConfig, containerType: 'mp4' | 'webm'): Promise<void> {
+async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'opus' | 'aac' | 'mp3' | 'flac' }, containerType: 'mp4' | 'webm', originalSampleRate: number): Promise<void> {
   try {
     console.log('Worker: Setting up audio encoder with config:', audioConfig, 'container:', containerType);
+    
+    // Handle auto-selection of audio codec based on container type
+    let finalAudioConfig = audioConfig;
+    if (audioConfig.codec === 'auto') {
+      if (containerType === 'mp4') {
+        finalAudioConfig = { ...audioConfig, codec: 'aac' };
+        console.log('Worker: Auto-selected AAC audio codec for MP4 container');
+      } else if (containerType === 'webm') {
+        finalAudioConfig = { ...audioConfig, codec: 'opus' };
+        console.log('Worker: Auto-selected Opus audio codec for WebM container');
+      } else {
+        // Fallback to AAC as most widely supported
+        finalAudioConfig = { ...audioConfig, codec: 'aac' };
+        console.log('Worker: Auto-selected AAC audio codec (fallback for unknown container)');
+      }
+      console.log('Worker: Final audio config after auto-selection:', finalAudioConfig);
+    }
     
     // Map audio codec to WebCodecs-compatible format based on container type
     let webCodecsCodec: string;
     let muxerCodec: string;
     
-    switch (audioConfig.codec) {
+    switch (finalAudioConfig.codec) {
       case 'opus':
         if (containerType !== 'webm') {
-          throw new Error('Opus codec is only supported in WebM containers');
+          // Auto-convert OPUS to AAC for MP4 containers
+          console.log('Worker: Auto-converting OPUS to AAC for MP4 container compatibility');
+          webCodecsCodec = 'mp4a.40.2'; // AAC-LC profile
+          muxerCodec = 'aac';
+        } else {
+          webCodecsCodec = 'opus';
+          muxerCodec = 'A_OPUS';
         }
-        webCodecsCodec = 'opus';
-        muxerCodec = 'A_OPUS';
         break;
         
       case 'aac':
@@ -208,28 +370,100 @@ async function setupAudioEncoder(audioConfig: AudioConfig, containerType: 'mp4' 
         break;
         
       default:
-        throw new Error(`Unsupported audio codec: ${audioConfig.codec}`);
+        throw new Error(`Unsupported audio codec: ${finalAudioConfig.codec}`);
     }
     
     // Build audio encoder configuration
-    const audioEncoderConfig = {
+    // Always use the original stream's sample rate to prevent mismatches
+    let sampleRate = originalSampleRate;
+    let numberOfChannels = finalAudioConfig.numberOfChannels;
+    
+    console.log(`Worker: Using original stream sample rate: ${sampleRate}Hz (configured: ${finalAudioConfig.sampleRate}Hz)`);
+    
+    let audioEncoderConfig: AudioEncoderConfig = {
       codec: webCodecsCodec,
-      sampleRate: audioConfig.sampleRate,
-      numberOfChannels: audioConfig.numberOfChannels,
-      bitrate: audioConfig.bitrate
+      sampleRate: sampleRate,
+      numberOfChannels: numberOfChannels,
+      bitrate: finalAudioConfig.bitrate
     };
     
     console.log('Worker: Testing audio encoder configuration:', audioEncoderConfig);
     
-    // Validate configuration support
-    const configSupport = await AudioEncoder.isConfigSupported(audioEncoderConfig);
+    // Validate configuration support with timeout and fallback strategy
+    let configSupport = await checkAudioSupportWithTimeout(audioEncoderConfig, 2000);
     console.log('Worker: Audio encoder configuration support:', {
       supported: configSupport.supported,
       config: configSupport.config
     });
     
+    console.log('Worker: Detailed encoder config comparison:', {
+      requested: audioEncoderConfig,
+      supported: configSupport.config
+    });
+    
+    // If initial config is not supported, try fallback configurations
     if (!configSupport.supported) {
-      throw new Error(`Audio encoder configuration not supported: ${JSON.stringify(audioEncoderConfig)}`);
+      console.log('Worker: Initial audio config not supported, trying fallback configurations...');
+      
+      // Fallback strategy: try different configurations in order of preference
+      const fallbackConfigs = [];
+      
+      if (finalAudioConfig.codec === 'aac') {
+        // AAC fallbacks - try different channel counts and bitrates at original sample rate
+        fallbackConfigs.push(
+          // Try stereo instead of mono (keeping original sample rate)
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
+          // Try different bitrates with stereo
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
+          // Try different bitrates with mono
+          { ...audioEncoderConfig, bitrate: 96000 },
+          { ...audioEncoderConfig, bitrate: 64000 },
+          // Try minimal config at original sample rate
+          { codec: 'mp4a.40.2', sampleRate: originalSampleRate, numberOfChannels: 2, bitrate: 128000 }
+        );
+      } else if (finalAudioConfig.codec === 'opus') {
+        // Opus fallbacks - try different channel counts and bitrates at original sample rate
+        fallbackConfigs.push(
+          // Try stereo instead of mono (keeping original sample rate)
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
+          // Try different bitrates with stereo
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
+          // Try different bitrates with mono
+          { ...audioEncoderConfig, bitrate: 96000 },
+          { ...audioEncoderConfig, bitrate: 64000 },
+          // Try minimal config at original sample rate
+          { codec: 'opus', sampleRate: originalSampleRate, numberOfChannels: 2, bitrate: 128000 }
+        );
+      }
+      
+      // Try each fallback configuration
+      let fallbackWorked = false;
+      for (let i = 0; i < fallbackConfigs.length; i++) {
+        const fallbackConfig = fallbackConfigs[i];
+        console.log(`Worker: Trying fallback audio config ${i + 1}/${fallbackConfigs.length}:`, fallbackConfig);
+        
+        try {
+          const fallbackSupport = await checkAudioSupportWithTimeout(fallbackConfig, 2000);
+          if (fallbackSupport.supported) {
+            console.log(`Worker: ✅ Fallback audio config ${i + 1} succeeded:`, fallbackConfig);
+            audioEncoderConfig = fallbackConfig;
+            configSupport = fallbackSupport;
+            fallbackWorked = true;
+            break;
+          } else {
+            console.log(`Worker: ❌ Fallback audio config ${i + 1} not supported`);
+          }
+        } catch (error) {
+          console.log(`Worker: ❌ Fallback audio config ${i + 1} failed:`, error instanceof Error ? error.message : String(error));
+        }
+      }
+      
+      if (!fallbackWorked) {
+        console.warn(`Worker: All audio configurations failed at ${originalSampleRate}Hz sample rate, disabling audio recording`);
+        throw new Error(`No supported audio encoder configuration found at ${originalSampleRate}Hz. Tried ${fallbackConfigs.length + 1} configurations. Browser may not support this sample rate. Falling back to video-only recording.`);
+      }
     }
     
     // Create AudioEncoder instance
@@ -251,8 +485,27 @@ async function setupAudioEncoder(audioConfig: AudioConfig, containerType: 'mp4' 
       }
     });
     
+    // Store the final configuration for later reference
+    currentAudioConfig = configSupport.config || audioEncoderConfig;
+    
     // Configure the audio encoder
-    audioEncoder.configure(configSupport.config || audioEncoderConfig);
+    audioEncoder.configure(currentAudioConfig);
+    
+    // Detect channel mismatch and set up upmixing if needed
+    originalStreamChannels = finalAudioConfig.numberOfChannels;
+    finalEncoderChannels = currentAudioConfig.numberOfChannels;
+    
+    if (originalStreamChannels === 1 && finalEncoderChannels === 2) {
+      needsUpmixing = true;
+      console.log('Worker: 🎵 Channel mismatch detected - enabling mono-to-stereo upmixing');
+      console.log(`Worker: Stream channels: ${originalStreamChannels}, Encoder channels: ${finalEncoderChannels}`);
+    } else if (originalStreamChannels !== finalEncoderChannels) {
+      console.warn(`Worker: ⚠️ Unsupported channel mismatch - Stream: ${originalStreamChannels}, Encoder: ${finalEncoderChannels}`);
+      console.warn('Worker: This configuration may cause audio processing issues');
+    } else {
+      needsUpmixing = false;
+      console.log(`Worker: ✅ Channel configuration matches - ${originalStreamChannels} channels`);
+    }
     
     console.log('Worker: Audio encoder successfully configured with codec:', webCodecsCodec);
     
@@ -266,18 +519,21 @@ async function setupAudioEncoder(audioConfig: AudioConfig, containerType: 'mp4' 
  * Handle incoming messages from the main thread
  */
 self.onmessage = (event: MessageEvent<RecorderWorkerRequest>) => {
+  console.log('🔔 Worker: Received message:', event.data.type);
   try {
     const { data } = event;
     
     // Handle different message types
     switch (data.type) {
       case 'start':
+        console.log('🎬 Worker: Processing start message...');
         if (data.config && data.stream) {
           handleStartMessage(data as RecorderWorkerRequest & { config: any; stream: ReadableStream<VideoFrame> });
         }
         break;
       
       case 'stop':
+        console.log('🛑 Worker: Processing stop message...');
         handleStopMessage();
         break;
       
@@ -289,6 +545,8 @@ self.onmessage = (event: MessageEvent<RecorderWorkerRequest>) => {
     console.error('Worker: Error handling message:', error);
   }
 };
+
+console.log('✅ Worker: Message handler registered, worker ready to receive messages');
 
 /**
  * Handle the 'start' message from main thread
@@ -385,7 +643,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         console.log(`Worker: Testing specific codec configuration:`, { ...baseEncoderConfig, codec: data.config.codec });
         const specificConfig = { ...baseEncoderConfig, codec: data.config.codec };
         
-        const configSupport = await VideoEncoder.isConfigSupported(specificConfig);
+        const configSupport = await checkVideoSupportWithTimeout(specificConfig, 2000);
         console.log(`Worker: Specific codec ${data.config.codec} support result:`, configSupport);
         console.log(`Worker: Support details - supported: ${configSupport.supported}, config: ${JSON.stringify(configSupport.config)}`);
         
@@ -496,7 +754,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
               const testConfig = { ...baseEncoderConfig, codec };
               console.log(`Worker: Testing ${strategy.name.toUpperCase()} codec ${codec}...`);
               
-              const configSupport = await VideoEncoder.isConfigSupported(testConfig);
+              const configSupport = await checkVideoSupportWithTimeout(testConfig, 2000);
               console.log(`Worker: ${strategy.name.toUpperCase()} codec ${codec} support:`, {
                 supported: configSupport.supported,
                 config: configSupport.config ? {
@@ -525,7 +783,12 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
                 console.log(`Worker: ❌ ${strategy.name.toUpperCase()} codec ${codec} not supported`);
               }
             } catch (error) {
-              console.warn(`Worker: Error testing ${strategy.name.toUpperCase()} codec ${codec}:`, error);
+              // Handle both timeout errors and other codec check errors
+              if (error instanceof Error && error.message.includes('timeout')) {
+                console.warn(`Worker: ⏱️ ${strategy.name.toUpperCase()} codec ${codec} check timed out after 2 seconds - likely hanging, skipping to next codec`);
+              } else {
+                console.warn(`Worker: Error testing ${strategy.name.toUpperCase()} codec ${codec}:`, error);
+              }
             }
           }
           
@@ -583,7 +846,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     const containerType: 'mp4' | 'webm' = (finalCodec === 'av1' || finalCodec === 'vp9') ? 'webm' : 'mp4';
     
     // Check if audio is enabled and available
-    const audioEnabled = data.config.audio?.enabled === true && data.audioStream;
+    let audioEnabled = data.config.audio?.enabled === true && data.audioStream;
     
     if (finalCodec === 'av1') {
       // AV1 codec - use WebM muxer
@@ -610,13 +873,11 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         };
       }
       
-      muxer = new WebMMuxer(muxerConfig);
+      muxer = await createWebMMuxer(muxerConfig);
     } else if (finalCodec === 'hevc') {
       // HEVC/H.265 codec - use MP4 muxer
       console.log('Worker: Using MP4 muxer for HEVC/H.265 codec', audioEnabled ? 'with audio' : 'video-only');
-      mp4Target = new ArrayBufferTarget();
       const muxerConfig: any = {
-        target: mp4Target,
         video: {
           codec: 'hevc',
           width: scaledWidth,
@@ -628,21 +889,23 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       
       // Add audio track if enabled
       if (audioEnabled && data.config.audio) {
-        const audioCodec = data.config.audio.codec === 'aac' ? 'aac' : 'mp3';
+        // For MP4 containers, use AAC (OPUS and other codecs are not compatible)
+        const audioCodec = 'aac';
         muxerConfig.audio = {
           codec: audioCodec,
           sampleRate: data.config.audio.sampleRate,
           numberOfChannels: data.config.audio.numberOfChannels
         };
+        console.log(`Worker: Using AAC audio codec for HEVC/MP4 container (original request: ${data.config.audio.codec})`);
       }
       
-      muxer = new Muxer(muxerConfig);
+      const { muxer: mp4Muxer, target } = await createMP4Muxer(muxerConfig);
+      muxer = mp4Muxer;
+      mp4Target = target;
     } else if (finalCodec === 'h264') {
       // H.264 codec - use MP4 muxer
       console.log('Worker: Using MP4 muxer for H.264 codec', audioEnabled ? 'with audio' : 'video-only');
-      mp4Target = new ArrayBufferTarget();
       const muxerConfig: any = {
-        target: mp4Target,
         video: {
           codec: 'avc',
           width: scaledWidth,
@@ -654,15 +917,19 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       
       // Add audio track if enabled
       if (audioEnabled && data.config.audio) {
-        const audioCodec = data.config.audio.codec === 'aac' ? 'aac' : 'mp3';
+        // For MP4 containers, use AAC (OPUS and other codecs are not compatible)
+        const audioCodec = 'aac';
         muxerConfig.audio = {
           codec: audioCodec,
           sampleRate: data.config.audio.sampleRate,
           numberOfChannels: data.config.audio.numberOfChannels
         };
+        console.log(`Worker: Using AAC audio codec for H.264/MP4 container (original request: ${data.config.audio.codec})`);
       }
       
-      muxer = new Muxer(muxerConfig);
+      const { muxer: mp4Muxer, target } = await createMP4Muxer(muxerConfig);
+      muxer = mp4Muxer;
+      mp4Target = target;
     } else if (finalCodec === 'vp9') {
       // VP9 codec - use WebM muxer
       console.log('Worker: Using WebM muxer for VP9 codec', audioEnabled ? 'with audio' : 'video-only');
@@ -688,15 +955,29 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         };
       }
       
-      muxer = new WebMMuxer(muxerConfig);
+      muxer = await createWebMMuxer(muxerConfig);
     } else {
       throw new Error(`Invalid final codec: ${finalCodec}. This should never happen.`);
     }
 
     // Step 3: Setup Audio Encoder (if audio is enabled)
     if (audioEnabled && data.config.audio) {
-      console.log('Worker: Setting up audio encoder...');
-      await setupAudioEncoder(data.config.audio, containerType);
+      try {
+        console.log('Worker: Setting up audio encoder...');
+        
+        // Extract original sample rate from the audio configuration
+        // The main thread should have passed the detected sample rate in the config
+        const originalSampleRate = data.config.audio.sampleRate;
+        console.log('Worker: Using original audio sample rate:', originalSampleRate, 'Hz');
+        
+        await setupAudioEncoder(data.config.audio, containerType, originalSampleRate);
+        console.log('Worker: ✅ Audio encoder setup successful');
+      } catch (audioError) {
+        console.warn('Worker: ⚠️ Audio setup failed, proceeding with video-only recording:', audioError instanceof Error ? audioError.message : String(audioError));
+        // Disable audio for this recording session
+        audioEnabled = false;
+        // Continue with video-only recording
+      }
     }
 
     // Step 4: Instantiate VideoEncoder with output callback
@@ -844,9 +1125,64 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
       
       // Encode the audio frame
       if (audioEncoder && audioFrame) {
-        audioEncoder.encode(audioFrame);
-        // Release the original frame memory
+        let frameToEncode = audioFrame;
+        let needsCleanup = false;
+        
+        try {
+          // Debug audio frame properties
+          console.log('Worker: Processing audio frame:', {
+            sampleRate: audioFrame.sampleRate,
+            numberOfChannels: audioFrame.numberOfChannels,
+            numberOfFrames: audioFrame.numberOfFrames,
+            format: audioFrame.format,
+            needsUpmixing: needsUpmixing
+          });
+          
+          // Handle channel mismatch with upmixing
+          if (needsUpmixing && audioFrame.numberOfChannels === 1 && finalEncoderChannels === 2) {
+            console.log('Worker: 🎵 Upmixing mono frame to stereo');
+            frameToEncode = upmixMonoToStereo(audioFrame);
+            needsCleanup = true; // We created a new frame that needs cleanup
+          } else if (currentAudioConfig && audioFrame.numberOfChannels !== currentAudioConfig.numberOfChannels) {
+            console.warn(`Worker: ⚠️ Unsupported channel mismatch - Frame has ${audioFrame.numberOfChannels} channels, encoder expects ${currentAudioConfig.numberOfChannels}. Skipping frame.`);
+            audioFrame.close();
+            return;
+          }
+          
+          // Check for sample rate mismatches
+          if (currentAudioConfig && audioFrame.sampleRate !== currentAudioConfig.sampleRate) {
+            console.warn(`Worker: Sample rate mismatch - Frame has ${audioFrame.sampleRate}Hz, encoder expects ${currentAudioConfig.sampleRate}Hz. Skipping frame.`);
+            audioFrame.close();
+            if (needsCleanup && frameToEncode !== audioFrame) {
+              frameToEncode.close();
+            }
+            return;
+          }
+          
+          // Encode the frame (original or upmixed)
+          audioEncoder.encode(frameToEncode);
+          
+        } catch (error) {
+          console.error('Worker: Error processing audio frame:', {
+            sampleRate: audioFrame.sampleRate,
+            numberOfChannels: audioFrame.numberOfChannels,
+            numberOfFrames: audioFrame.numberOfFrames,
+            format: audioFrame.format,
+            needsUpmixing: needsUpmixing,
+            error: error
+          });
+          // Cleanup on error
+          if (needsCleanup && frameToEncode !== audioFrame) {
+            frameToEncode.close();
+          }
+          throw error;
+        }
+        
+        // Release frame memory
         audioFrame.close();
+        if (needsCleanup && frameToEncode !== audioFrame) {
+          frameToEncode.close();
+        }
       }
     }
     
@@ -911,6 +1247,7 @@ async function handleStopMessage(): Promise<void> {
       // Close the encoder
       audioEncoder.close();
       audioEncoder = null;
+      currentAudioConfig = null;
     }
 
     // Step 3: Finalize Muxer - Complete the video file
@@ -966,6 +1303,12 @@ async function handleStopMessage(): Promise<void> {
     // Reset codec state
     currentCodec = null;
     mp4Target = null;
+    
+    // Reset audio upmixing state
+    needsUpmixing = false;
+    originalStreamChannels = 0;
+    finalEncoderChannels = 0;
+    currentAudioConfig = null;
 
     // Step 6: Close Worker - Terminate this worker thread
     self.close();

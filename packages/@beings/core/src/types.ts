@@ -12,7 +12,7 @@ export interface AudioConfig {
   /** Whether audio recording is enabled */
   enabled: boolean;
   /** Audio codec to use for encoding */
-  codec: 'opus' | 'aac' | 'mp3' | 'flac';
+  codec: 'auto' | 'opus' | 'aac' | 'mp3' | 'flac';
   /** Audio sample rate in Hz */
   sampleRate: 48000 | 44100 | 32000 | 16000;
   /** Number of audio channels (1 = mono, 2 = stereo) */
