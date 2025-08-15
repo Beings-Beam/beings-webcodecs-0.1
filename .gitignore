@@ -55,3 +55,6 @@ temp/
 
 # WebCodecs reference repository (cloned for reference only)
 webcodecs/
+
+# GitHub CLI download
+gh_*/
