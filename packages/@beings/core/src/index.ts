@@ -8,5 +8,5 @@
  * in React, Vue, Svelte, or vanilla JavaScript applications.
  */
 
-export * from './SlowTrackRecorder';
-export * from './types';
+export * from './SlowTrackRecorder.js';
+export * from './types.js';
