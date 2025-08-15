@@ -1,16 +1,16 @@
 /// <reference lib="webworker" />
 
 /**
- * Recorder Worker - Video Encoding Implementation
+ * Recorder Worker - Video and Audio Encoding Implementation
  * 
- * This worker handles the heavy lifting of video processing and encoding
- * for the SlowTrackRecorder. Implements WebCodecs VideoEncoder with
- * mp4-muxer for container creation.
+ * This worker handles the heavy lifting of video and audio processing and encoding
+ * for the SlowTrackRecorder. Implements WebCodecs VideoEncoder and AudioEncoder
+ * with mp4-muxer and webm-muxer for container creation.
  */
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import WebMMuxer from 'webm-muxer';
-import type { RecorderWorkerRequest, RecorderWorkerResponse } from './types';
+import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig } from './types';
 
 // Module-level state variables
 let videoEncoder: VideoEncoder | null = null;
@@ -18,6 +18,10 @@ let muxer: Muxer<ArrayBufferTarget> | WebMMuxer | null = null;
 let mp4Target: ArrayBufferTarget | null = null; // Store MP4 target separately
 let streamReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
 let currentCodec: string | null = null;
+
+// Audio pipeline state variables
+let audioEncoder: AudioEncoder | null = null;
+let audioStreamReader: ReadableStreamDefaultReader<AudioData> | null = null;
 
 // Downscaling state variables
 let needsScaling = false;
@@ -152,6 +156,108 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     
   } catch (error) {
     console.error('Worker: Error in processFrameWithDownscaling:', error);
+    throw error;
+  }
+}
+
+/**
+ * Setup and configure the AudioEncoder for the given audio configuration
+ * 
+ * @param audioConfig - Audio configuration from the main thread
+ * @param containerType - Container type ('mp4' or 'webm') to determine codec compatibility
+ */
+async function setupAudioEncoder(audioConfig: AudioConfig, containerType: 'mp4' | 'webm'): Promise<void> {
+  try {
+    console.log('Worker: Setting up audio encoder with config:', audioConfig, 'container:', containerType);
+    
+    // Map audio codec to WebCodecs-compatible format based on container type
+    let webCodecsCodec: string;
+    let muxerCodec: string;
+    
+    switch (audioConfig.codec) {
+      case 'opus':
+        if (containerType !== 'webm') {
+          throw new Error('Opus codec is only supported in WebM containers');
+        }
+        webCodecsCodec = 'opus';
+        muxerCodec = 'A_OPUS';
+        break;
+        
+      case 'aac':
+        if (containerType !== 'mp4') {
+          throw new Error('AAC codec is only supported in MP4 containers');
+        }
+        webCodecsCodec = 'mp4a.40.2'; // AAC-LC profile
+        muxerCodec = 'aac';
+        break;
+        
+      case 'mp3':
+        if (containerType !== 'mp4') {
+          throw new Error('MP3 codec is only supported in MP4 containers');
+        }
+        webCodecsCodec = 'mp3';
+        muxerCodec = 'mp3';
+        break;
+        
+      case 'flac':
+        if (containerType !== 'webm') {
+          throw new Error('FLAC codec is only supported in WebM containers');
+        }
+        webCodecsCodec = 'flac';
+        muxerCodec = 'A_FLAC';
+        break;
+        
+      default:
+        throw new Error(`Unsupported audio codec: ${audioConfig.codec}`);
+    }
+    
+    // Build audio encoder configuration
+    const audioEncoderConfig = {
+      codec: webCodecsCodec,
+      sampleRate: audioConfig.sampleRate,
+      numberOfChannels: audioConfig.numberOfChannels,
+      bitrate: audioConfig.bitrate
+    };
+    
+    console.log('Worker: Testing audio encoder configuration:', audioEncoderConfig);
+    
+    // Validate configuration support
+    const configSupport = await AudioEncoder.isConfigSupported(audioEncoderConfig);
+    console.log('Worker: Audio encoder configuration support:', {
+      supported: configSupport.supported,
+      config: configSupport.config
+    });
+    
+    if (!configSupport.supported) {
+      throw new Error(`Audio encoder configuration not supported: ${JSON.stringify(audioEncoderConfig)}`);
+    }
+    
+    // Create AudioEncoder instance
+    audioEncoder = new AudioEncoder({
+      output: (chunk: EncodedAudioChunk, metadata?: EncodedAudioChunkMetadata) => {
+        try {
+          // Pass encoded audio chunk to muxer
+          if (muxer) {
+            muxer.addAudioChunk(chunk, metadata || {});
+          }
+        } catch (error) {
+          console.error('Worker: Audio muxer error:', error);
+          self.postMessage({ type: 'error', error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      error: (error: Error) => {
+        console.error('Worker: AudioEncoder error:', error);
+        self.postMessage({ type: 'error', error: error.message });
+      }
+    });
+    
+    // Configure the audio encoder
+    audioEncoder.configure(configSupport.config || audioEncoderConfig);
+    
+    console.log('Worker: Audio encoder successfully configured with codec:', webCodecsCodec);
+    
+  } catch (error) {
+    console.error('Worker: Error setting up audio encoder:', error);
     throw error;
   }
 }
@@ -473,10 +579,16 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     muxedChunks = [];
     currentCodec = encoderConfig.codec;
     
+    // Determine container type for audio codec compatibility
+    const containerType: 'mp4' | 'webm' = (finalCodec === 'av1' || finalCodec === 'vp9') ? 'webm' : 'mp4';
+    
+    // Check if audio is enabled and available
+    const audioEnabled = data.config.audio?.enabled === true && data.audioStream;
+    
     if (finalCodec === 'av1') {
       // AV1 codec - use WebM muxer
-      console.log('Worker: Using WebM muxer for AV1 codec');
-      muxer = new WebMMuxer({
+      console.log('Worker: Using WebM muxer for AV1 codec', audioEnabled ? 'with audio' : 'video-only');
+      const muxerConfig: any = {
         target: (data) => {
           muxedChunks.push(data);
         },
@@ -486,12 +598,24 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
           height: scaledHeight
         },
         firstTimestampBehavior: 'offset'
-      });
+      };
+      
+      // Add audio track if enabled
+      if (audioEnabled && data.config.audio) {
+        const audioCodec = data.config.audio.codec === 'opus' ? 'A_OPUS' : 'A_FLAC';
+        muxerConfig.audio = {
+          codec: audioCodec,
+          sampleRate: data.config.audio.sampleRate,
+          numberOfChannels: data.config.audio.numberOfChannels
+        };
+      }
+      
+      muxer = new WebMMuxer(muxerConfig);
     } else if (finalCodec === 'hevc') {
       // HEVC/H.265 codec - use MP4 muxer
-      console.log('Worker: Using MP4 muxer for HEVC/H.265 codec');
+      console.log('Worker: Using MP4 muxer for HEVC/H.265 codec', audioEnabled ? 'with audio' : 'video-only');
       mp4Target = new ArrayBufferTarget();
-      muxer = new Muxer({
+      const muxerConfig: any = {
         target: mp4Target,
         video: {
           codec: 'hevc',
@@ -500,12 +624,24 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         },
         fastStart: 'fragmented',
         firstTimestampBehavior: 'offset'
-      });
+      };
+      
+      // Add audio track if enabled
+      if (audioEnabled && data.config.audio) {
+        const audioCodec = data.config.audio.codec === 'aac' ? 'aac' : 'mp3';
+        muxerConfig.audio = {
+          codec: audioCodec,
+          sampleRate: data.config.audio.sampleRate,
+          numberOfChannels: data.config.audio.numberOfChannels
+        };
+      }
+      
+      muxer = new Muxer(muxerConfig);
     } else if (finalCodec === 'h264') {
       // H.264 codec - use MP4 muxer
-      console.log('Worker: Using MP4 muxer for H.264 codec');
+      console.log('Worker: Using MP4 muxer for H.264 codec', audioEnabled ? 'with audio' : 'video-only');
       mp4Target = new ArrayBufferTarget();
-      muxer = new Muxer({
+      const muxerConfig: any = {
         target: mp4Target,
         video: {
           codec: 'avc',
@@ -514,11 +650,23 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         },
         fastStart: 'fragmented',
         firstTimestampBehavior: 'offset'
-      });
+      };
+      
+      // Add audio track if enabled
+      if (audioEnabled && data.config.audio) {
+        const audioCodec = data.config.audio.codec === 'aac' ? 'aac' : 'mp3';
+        muxerConfig.audio = {
+          codec: audioCodec,
+          sampleRate: data.config.audio.sampleRate,
+          numberOfChannels: data.config.audio.numberOfChannels
+        };
+      }
+      
+      muxer = new Muxer(muxerConfig);
     } else if (finalCodec === 'vp9') {
       // VP9 codec - use WebM muxer
-      console.log('Worker: Using WebM muxer for VP9 codec');
-      muxer = new WebMMuxer({
+      console.log('Worker: Using WebM muxer for VP9 codec', audioEnabled ? 'with audio' : 'video-only');
+      const muxerConfig: any = {
         target: (data) => {
           muxedChunks.push(data);
         },
@@ -528,12 +676,30 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
           height: scaledHeight
         },
         firstTimestampBehavior: 'offset'
-      });
+      };
+      
+      // Add audio track if enabled
+      if (audioEnabled && data.config.audio) {
+        const audioCodec = data.config.audio.codec === 'opus' ? 'A_OPUS' : 'A_FLAC';
+        muxerConfig.audio = {
+          codec: audioCodec,
+          sampleRate: data.config.audio.sampleRate,
+          numberOfChannels: data.config.audio.numberOfChannels
+        };
+      }
+      
+      muxer = new WebMMuxer(muxerConfig);
     } else {
       throw new Error(`Invalid final codec: ${finalCodec}. This should never happen.`);
     }
 
-    // Step 3: Instantiate VideoEncoder with output callback
+    // Step 3: Setup Audio Encoder (if audio is enabled)
+    if (audioEnabled && data.config.audio) {
+      console.log('Worker: Setting up audio encoder...');
+      await setupAudioEncoder(data.config.audio, containerType);
+    }
+
+    // Step 4: Instantiate VideoEncoder with output callback
     videoEncoder = new VideoEncoder({
       output: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
         try {
@@ -542,7 +708,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
             muxer.addVideoChunk(chunk, metadata || {});
           }
         } catch (error) {
-          console.error('Worker: Muxer error:', error);
+          console.error('Worker: Video muxer error:', error);
           self.postMessage({ type: 'error', error: error instanceof Error ? error.message : String(error) });
         }
       },
@@ -552,7 +718,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       }
     });
 
-    // Step 4: Configure Encoder
+    // Step 5: Configure Video Encoder
     videoEncoder.configure(encoderConfig);
 
     // Send confirmation back to main thread with final codec information
@@ -564,11 +730,21 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     self.postMessage(response);
     console.log('Worker: Ready message sent successfully');
 
-    // Step 5: Start Processing the video stream
+    // Step 6: Start Processing - Concurrent video and audio processing
     if (!data.stream) {
       throw new Error('No video stream provided');
     }
-    await startProcessing(data.stream);
+
+    const processingPromises: Promise<void>[] = [startVideoProcessing(data.stream)];
+    
+    // Add audio processing if audio is enabled and stream is available
+    if (audioEnabled && data.audioStream) {
+      console.log('Worker: Starting concurrent audio processing...');
+      processingPromises.push(startAudioProcessing(data.audioStream));
+    }
+    
+    // Wait for both video and audio processing to complete
+    await Promise.all(processingPromises);
 
   } catch (error) {
     console.error('Worker: Error in handleStartMessage:', error);
@@ -584,7 +760,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
  * 
  * @param stream - ReadableStream of VideoFrame objects from main thread
  */
-async function startProcessing(stream: ReadableStream<VideoFrame>): Promise<void> {
+async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise<void> {
   try {
     // Get reader from the stream
     streamReader = stream.getReader();
@@ -597,18 +773,18 @@ async function startProcessing(stream: ReadableStream<VideoFrame>): Promise<void
       
       // Check if stream is complete
       if (done) {
-        console.log('Worker: Stream ended, stopping processing');
+        console.log('Worker: Video stream ended, stopping processing');
         break;
       }
       
       // Backpressure management - wait for encoder to catch up
       if (videoEncoder && videoEncoder.encodeQueueSize > 30) {
-        console.warn('Worker: Encoder queue getting full, waiting for it to drain. Queue size:', videoEncoder.encodeQueueSize);
+        console.warn('Worker: Video encoder queue getting full, waiting for it to drain. Queue size:', videoEncoder.encodeQueueSize);
         // Wait until the queue size drops to a reasonable level
         while (videoEncoder && videoEncoder.encodeQueueSize > 15) {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-        console.log('Worker: Encoder queue drained to:', videoEncoder?.encodeQueueSize);
+        console.log('Worker: Video encoder queue drained to:', videoEncoder?.encodeQueueSize);
       }
       
       // Encode the frame (with conditional downscaling)
@@ -626,7 +802,56 @@ async function startProcessing(stream: ReadableStream<VideoFrame>): Promise<void
     }
     
   } catch (error) {
-    console.error('Worker: Error in processing loop:', error);
+    console.error('Worker: Error in video processing loop:', error);
+    self.postMessage({ 
+      type: 'error', 
+      error: error instanceof Error ? error.message : String(error) 
+    });
+  }
+}
+
+/**
+ * Process audio frames from the stream through the encoder
+ * 
+ * @param stream - ReadableStream of AudioData objects from main thread
+ */
+async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<void> {
+  try {
+    // Get reader from the stream
+    audioStreamReader = stream.getReader();
+    
+    console.log('Worker: Starting audio frame processing loop');
+    
+    // Continuous processing loop
+    while (true) {
+      const { done, value: audioFrame } = await audioStreamReader.read();
+      
+      // Check if stream is complete
+      if (done) {
+        console.log('Worker: Audio stream ended, stopping processing');
+        break;
+      }
+      
+      // Backpressure management - wait for encoder to catch up
+      if (audioEncoder && audioEncoder.encodeQueueSize > 30) {
+        console.warn('Worker: Audio encoder queue getting full, waiting for it to drain. Queue size:', audioEncoder.encodeQueueSize);
+        // Wait until the queue size drops to a reasonable level
+        while (audioEncoder && audioEncoder.encodeQueueSize > 15) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        console.log('Worker: Audio encoder queue drained to:', audioEncoder?.encodeQueueSize);
+      }
+      
+      // Encode the audio frame
+      if (audioEncoder && audioFrame) {
+        audioEncoder.encode(audioFrame);
+        // Release the original frame memory
+        audioFrame.close();
+      }
+    }
+    
+  } catch (error) {
+    console.error('Worker: Error in audio processing loop:', error);
     self.postMessage({ 
       type: 'error', 
       error: error instanceof Error ? error.message : String(error) 
@@ -642,28 +867,50 @@ async function handleStopMessage(): Promise<void> {
   try {
     console.log('Worker: Received stop command, finalizing recording');
 
-    // Step 1: Cancel Stream Reader - Stop processing new frames
+    // Step 1: Cancel Stream Readers - Stop processing new frames
     if (streamReader) {
       try {
         await streamReader.cancel();
-        console.log('Worker: Stream reader cancelled');
+        console.log('Worker: Video stream reader cancelled');
       } catch (error) {
-        console.warn('Worker: Error cancelling stream reader:', error);
+        console.warn('Worker: Error cancelling video stream reader:', error);
       }
       streamReader = null;
     }
 
-    // Step 2: Flush Encoder - Process any remaining buffered frames
+    if (audioStreamReader) {
+      try {
+        await audioStreamReader.cancel();
+        console.log('Worker: Audio stream reader cancelled');
+      } catch (error) {
+        console.warn('Worker: Error cancelling audio stream reader:', error);
+      }
+      audioStreamReader = null;
+    }
+
+    // Step 2: Flush Encoders - Process any remaining buffered frames
     if (videoEncoder) {
       try {
         await videoEncoder.flush();
         console.log('Worker: VideoEncoder flushed');
       } catch (error) {
-        console.warn('Worker: Error flushing encoder:', error);
+        console.warn('Worker: Error flushing video encoder:', error);
       }
       // Close the encoder
       videoEncoder.close();
       videoEncoder = null;
+    }
+
+    if (audioEncoder) {
+      try {
+        await audioEncoder.flush();
+        console.log('Worker: AudioEncoder flushed');
+      } catch (error) {
+        console.warn('Worker: Error flushing audio encoder:', error);
+      }
+      // Close the encoder
+      audioEncoder.close();
+      audioEncoder = null;
     }
 
     // Step 3: Finalize Muxer - Complete the video file

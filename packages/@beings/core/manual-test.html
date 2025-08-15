@@ -630,7 +630,7 @@
                         <!-- Codec Selection Control -->
                         <div style="margin-bottom: 0;">
                             <label for="codecSelection" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
-                                Codec:
+                                Video Codec:
                             </label>
                             <select id="codecSelection" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
                                 <option value="auto">Auto-detect (Recommended)</option>
@@ -640,6 +640,33 @@
                                 <option value="vp9">VP9 (WebM)</option>
                             </select>
                             <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Auto-detect tries AV1 → HEVC → H.264 → VP9</span>
+                        </div>
+                    </div>
+
+                    <!-- Audio Settings -->
+                    <div style="margin-top: 24px; padding: 16px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--section-bg);">
+                        <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: var(--text-color);">🎵 Audio Settings</h4>
+                        
+                        <!-- Audio Enable Control -->
+                        <div style="margin-bottom: 16px;">
+                            <label for="audioEnabledCheckbox" style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text-color); cursor: pointer; font-size: 12px;">
+                                <input type="checkbox" id="audioEnabledCheckbox" style="margin: 0;">
+                                <span>Enable Audio Recording</span>
+                            </label>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 24px;">Capture microphone audio along with screen recording</span>
+                        </div>
+
+                        <!-- Audio Codec Selection Control -->
+                        <div style="margin-bottom: 0;">
+                            <label for="audioCodecSelector" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
+                                Audio Codec:
+                            </label>
+                            <select id="audioCodecSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                                <option value="opus">Opus (for WebM)</option>
+                                <option value="aac">AAC (for MP4)</option>
+                                <option value="flac">FLAC (for WebM)</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Codec compatibility depends on video container format</span>
                         </div>
                     </div>
                 </div>
@@ -2096,14 +2123,16 @@
             try {
                 showStatus('Requesting screen capture...', 'info');
                 
-                // Get frame rate preference for screen capture
+                // Get frame rate preference and audio setting for screen capture
                 const frameRateTarget = frameRateSelector.value;
-                const videoConstraints = frameRateTarget === 'auto' 
-                    ? { video: true }
-                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } } };
+                const audioEnabled = document.getElementById('audioEnabledCheckbox').checked;
+                
+                const constraints = frameRateTarget === 'auto' 
+                    ? { video: true, audio: audioEnabled }
+                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } }, audio: audioEnabled };
                 
                 // Get screenshare stream
-                mediaStream = await navigator.mediaDevices.getDisplayMedia(videoConstraints);
+                mediaStream = await navigator.mediaDevices.getDisplayMedia(constraints);
                 console.log('Stream captured:', mediaStream);
                 showStatus('Screen capture started - click Record to begin recording', 'success');
 
@@ -2185,7 +2214,13 @@
                 console.log('Passing frameRate to recorder:', selectedFrameRate);
                 console.log('Selected resolution target:', resolutionTarget);
                 console.log('Codec configuration:', codecConfig || 'auto-detect');
-                showStatus(`Stream: ${width}×${height} @ ${frameRate}fps → Target: ${resolutionTarget} @ ${selectedFrameRate}fps → Codec: ${codecConfig ? 'Force VP9 Test Mode' : 'Auto-detecting'}${testingMessage}`, 'info');
+                
+                // Check audio settings for logging and status
+                const audioEnabled = document.getElementById('audioEnabledCheckbox').checked;
+                console.log('Audio enabled:', audioEnabled);
+                
+                const audioStatusText = audioEnabled ? ` + Audio (${document.getElementById('audioCodecSelector').value.toUpperCase()})` : ' (Video Only)';
+                showStatus(`Stream: ${width}×${height} @ ${frameRate}fps → Target: ${resolutionTarget} @ ${selectedFrameRate}fps${audioStatusText} → Codec: ${codecConfig ? 'Force VP9 Test Mode' : 'Auto-detecting'}${testingMessage}`, 'info');
                 
                 // Read advanced encoder settings
                 const targetBitrate = parseInt(bitrateSlider.value);
@@ -2223,6 +2258,19 @@
                 // Add codec override if testing mode is enabled
                 if (codecConfig) {
                     recorderConfig.codec = codecConfig;
+                }
+                
+                // Add audio configuration if audio is enabled
+                if (audioEnabled) {
+                    const audioCodec = document.getElementById('audioCodecSelector').value;
+                    recorderConfig.audio = {
+                        enabled: true,
+                        codec: audioCodec,
+                        sampleRate: 48000,      // Sensible default: 48kHz
+                        numberOfChannels: 2,    // Sensible default: Stereo
+                        bitrate: 128000         // Sensible default: 128kbps
+                    };
+                    console.log('Audio configuration:', recorderConfig.audio);
                 }
                 
                 recorder = new SlowTrackRecorder(recorderConfig);

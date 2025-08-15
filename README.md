@@ -1,4 +1,4 @@
-# Beings WebCodecs 0.1
+# Beings WebCodecs 0.1 - EXPERIMENT ONLY
 
 A framework-agnostic WebCodecs-based screen recording library with advanced video encoding capabilities.
 

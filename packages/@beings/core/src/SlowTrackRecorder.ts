@@ -1,8 +1,8 @@
-import type { RecorderWorkerResponse } from './types';
+import type { RecorderWorkerResponse, AudioConfig } from './types';
 
 /**
  * Configuration interface for the SlowTrackRecorder
- * Defines video recording parameters for the high-fidelity archival track
+ * Defines video and audio recording parameters for the high-fidelity archival track
  */
 export interface SlowTrackRecorderConfig {
   width: number;
@@ -13,6 +13,8 @@ export interface SlowTrackRecorderConfig {
   codecSelection?: 'auto' | 'av1' | 'hevc' | 'h264' | 'vp9';
   keyframeIntervalSeconds?: number;
   hardwareAcceleration?: 'no-preference' | 'prefer-hardware' | 'prefer-software';
+  /** Optional audio recording configuration */
+  audio?: AudioConfig;
 }
 
 /**
@@ -69,8 +71,47 @@ export class SlowTrackRecorder {
    * @returns {boolean} True if WebCodecs and required APIs are available
    */
   static isSupported(): boolean {
-    return typeof window.MediaStreamTrackProcessor !== 'undefined' &&
-           typeof window.VideoEncoder !== 'undefined';
+    const hasVideoSupport = typeof window.MediaStreamTrackProcessor !== 'undefined' &&
+                           typeof window.VideoEncoder !== 'undefined';
+    
+    const hasAudioSupport = typeof window.AudioEncoder !== 'undefined';
+    
+    // Log audio capability for debugging
+    if (hasVideoSupport && !hasAudioSupport) {
+      console.info('SlowTrackRecorder: Video recording supported, audio recording not available');
+    } else if (hasVideoSupport && hasAudioSupport) {
+      console.info('SlowTrackRecorder: Both video and audio recording supported');
+    }
+    
+    // Return true if video is supported (audio is optional enhancement)
+    return hasVideoSupport;
+  }
+
+  /**
+   * Validate and sanitize audio configuration
+   * 
+   * @param audioConfig - Audio configuration to validate
+   * @returns Validated audio configuration or undefined if invalid
+   */
+  static #validateAudioConfig(audioConfig: AudioConfig): AudioConfig | undefined {
+    try {
+      // Check if AudioEncoder is available when audio is enabled
+      if (audioConfig.enabled && typeof window.AudioEncoder === 'undefined') {
+        console.warn('SlowTrackRecorder: Audio enabled but AudioEncoder not available, disabling audio');
+        return { ...audioConfig, enabled: false };
+      }
+
+      // Validate bitrate range (8kbps to 512kbps)
+      if (audioConfig.bitrate < 8000 || audioConfig.bitrate > 512000) {
+        console.warn(`SlowTrackRecorder: Audio bitrate ${audioConfig.bitrate} out of range, using 128000`);
+        return { ...audioConfig, bitrate: 128000 };
+      }
+
+      return audioConfig;
+    } catch (error) {
+      console.warn('SlowTrackRecorder: Error validating audio config:', error);
+      return undefined;
+    }
   }
 
   /**
@@ -79,7 +120,13 @@ export class SlowTrackRecorder {
    * @param config - Recording configuration parameters
    */
   constructor(config: SlowTrackRecorderConfig) {
-    this.#config = config;
+    // Validate and sanitize audio configuration if provided
+    if (config.audio) {
+      const validatedAudio = SlowTrackRecorder.#validateAudioConfig(config.audio);
+      this.#config = { ...config, audio: validatedAudio };
+    } else {
+      this.#config = config;
+    }
   }
 
   /**
@@ -242,12 +289,24 @@ export class SlowTrackRecorder {
         throw new Error('Recording already in progress');
       }
 
-      // Get Video Track: Extract the first video track from the stream
+      // Extract Tracks: Get both video and audio tracks from the stream
       const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+      
       if (videoTracks.length === 0) {
         throw new Error('No video tracks found in the provided MediaStream');
       }
+      
       const videoTrack = videoTracks[0];
+      const audioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
+      
+      // Audio Configuration Check: Validate audio availability vs config
+      const audioEnabled = this.#config.audio?.enabled === true;
+      const hasAudio = audioTrack !== null && audioEnabled;
+      
+      if (audioEnabled && !audioTrack) {
+        console.warn('SlowTrackRecorder: Audio enabled in config but no audio tracks found in stream, proceeding with video-only recording');
+      }
 
       // Initialize Worker: Create new worker instance
       this.#worker = new Worker(
@@ -258,17 +317,35 @@ export class SlowTrackRecorder {
       // Attach Message Handler: Listen for messages from worker
       this.#worker.onmessage = this.#handleWorkerMessage.bind(this);
 
-      // Create Stream Processor: Convert video track to readable stream
-      const processor = new MediaStreamTrackProcessor({ track: videoTrack } as MediaStreamTrackProcessorInit);
-      const readableStream = processor.readable;
+      // Create Stream Processors: Convert tracks to readable streams
+      const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack } as MediaStreamTrackProcessorInit);
+      const videoStream = videoProcessor.readable;
+      
+      let audioStream: ReadableStream<AudioData> | undefined;
+      if (hasAudio) {
+        try {
+          const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack } as MediaStreamTrackProcessorInit);
+          audioStream = audioProcessor.readable;
+        } catch (error) {
+          console.warn('SlowTrackRecorder: Failed to create audio processor, proceeding with video-only:', error);
+          audioStream = undefined;
+        }
+      }
 
-      // Post Message: Transfer the stream to the worker
+      // Post Message: Transfer streams to the worker
       const message = {
-        type: 'start',
+        type: 'start' as const,
         config: this.#config,
-        stream: readableStream
+        stream: videoStream,
+        audioStream: audioStream
       };
-      this.#worker.postMessage(message, [readableStream]);
+      
+      const transferables: Transferable[] = [videoStream];
+      if (audioStream) {
+        transferables.push(audioStream);
+      }
+      
+      this.#worker.postMessage(message, transferables);
 
       // Wait for worker initialization: Create promise to wait for 'ready' or 'error' message
       await new Promise<void>((resolve, reject) => {

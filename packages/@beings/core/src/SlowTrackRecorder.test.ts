@@ -9,7 +9,7 @@ const mockWorker = {
   onmessage: null as ((event: MessageEvent<RecorderWorkerResponse>) => void) | null,
 };
 
-const mockMediaStreamTrack = {
+const mockVideoStreamTrack = {
   kind: 'video',
   id: 'mock-video-track',
   label: 'Mock Video Track',
@@ -17,6 +17,21 @@ const mockMediaStreamTrack = {
   muted: false,
   readyState: 'live' as MediaStreamTrackState,
   getSettings: vi.fn(() => ({ width: 1920, height: 1080, frameRate: 30 })),
+  stop: vi.fn(),
+  clone: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+};
+
+const mockAudioStreamTrack = {
+  kind: 'audio',
+  id: 'mock-audio-track',
+  label: 'Mock Audio Track',
+  enabled: true,
+  muted: false,
+  readyState: 'live' as MediaStreamTrackState,
+  getSettings: vi.fn(() => ({ sampleRate: 48000, channelCount: 2 })),
   stop: vi.fn(),
   clone: vi.fn(),
   addEventListener: vi.fn(),
@@ -69,9 +84,23 @@ const mockReadableStream = {
 const mockMediaStream = {
   id: 'mock-stream',
   active: true,
-  getVideoTracks: vi.fn(() => [mockMediaStreamTrack]),
+  getVideoTracks: vi.fn(() => [mockVideoStreamTrack]),
   getAudioTracks: vi.fn(() => []),
-  getTracks: vi.fn(() => [mockMediaStreamTrack]),
+  getTracks: vi.fn(() => [mockVideoStreamTrack]),
+  addTrack: vi.fn(),
+  removeTrack: vi.fn(),
+  clone: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+};
+
+const mockMediaStreamWithAudio = {
+  id: 'mock-stream-with-audio',
+  active: true,
+  getVideoTracks: vi.fn(() => [mockVideoStreamTrack]),
+  getAudioTracks: vi.fn(() => [mockAudioStreamTrack]),
+  getTracks: vi.fn(() => [mockVideoStreamTrack, mockAudioStreamTrack]),
   addTrack: vi.fn(),
   removeTrack: vi.fn(),
   clone: vi.fn(),
@@ -85,6 +114,8 @@ vi.stubGlobal('Worker', vi.fn(() => mockWorker));
 vi.stubGlobal('MediaStreamTrackProcessor', vi.fn(() => ({ 
   readable: mockReadableStream 
 })));
+vi.stubGlobal('AudioEncoder', vi.fn(() => ({})));
+vi.stubGlobal('VideoEncoder', vi.fn(() => ({})));
 
 describe('SlowTrackRecorder', () => {
   let recorder: SlowTrackRecorder;
@@ -100,6 +131,14 @@ describe('SlowTrackRecorder', () => {
     
     // Reset stream mock state
     mockReadableStream.getReader = vi.fn(() => createMockReader());
+    
+    // Ensure global mocks are properly set up
+    vi.stubGlobal('Worker', vi.fn(() => mockWorker));
+    vi.stubGlobal('MediaStreamTrackProcessor', vi.fn(() => ({ 
+      readable: mockReadableStream 
+    })));
+    vi.stubGlobal('AudioEncoder', vi.fn(() => ({})));
+    vi.stubGlobal('VideoEncoder', vi.fn(() => ({})));
     
     // Create recorder instance with test configuration
     recorder = new SlowTrackRecorder({
@@ -164,7 +203,7 @@ describe('SlowTrackRecorder', () => {
 
     // Verify MediaStreamTrackProcessor was created with the video track
     expect((globalThis as any).MediaStreamTrackProcessor).toHaveBeenCalledWith({
-      track: mockMediaStreamTrack
+      track: mockVideoStreamTrack
     });
   });
 
@@ -193,8 +232,8 @@ describe('SlowTrackRecorder', () => {
           // Immediately respond with file
           setTimeout(() => {
             if (workerInstance.onmessage) {
-              const buffer = new ArrayBuffer(123);
-              workerInstance.onmessage({ data: { type: 'file', buffer } });
+              const blob = new Blob(['test video data'], { type: 'video/mp4' });
+              workerInstance.onmessage({ data: { type: 'file', blob } });
             }
           }, 0);
         }
@@ -219,5 +258,156 @@ describe('SlowTrackRecorder', () => {
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.size).toBeGreaterThan(0);
     expect(blob.type).toBe('video/mp4');
+  });
+
+  test('isSupported() should check for both video and audio support', () => {
+    // Test with both video and audio support
+    expect(SlowTrackRecorder.isSupported()).toBe(true);
+    
+    // Test without AudioEncoder (should still return true)
+    vi.stubGlobal('AudioEncoder', undefined);
+    expect(SlowTrackRecorder.isSupported()).toBe(true);
+    
+    // Test without VideoEncoder (should return false)
+    vi.stubGlobal('VideoEncoder', undefined);
+    expect(SlowTrackRecorder.isSupported()).toBe(false);
+    
+    // Restore mocks
+    vi.stubGlobal('AudioEncoder', vi.fn(() => ({})));
+    vi.stubGlobal('VideoEncoder', vi.fn(() => ({})));
+  });
+
+  test('should handle audio configuration validation', () => {
+    // Test with valid audio config
+    const recorderWithAudio = new SlowTrackRecorder({
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrate: 2000000,
+      audio: {
+        enabled: true,
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000
+      }
+    });
+    
+    expect(recorderWithAudio).toBeInstanceOf(SlowTrackRecorder);
+    
+    // Test with invalid bitrate (should be corrected)
+    const recorderWithInvalidBitrate = new SlowTrackRecorder({
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrate: 2000000,
+      audio: {
+        enabled: true,
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 1000000 // Too high, should be corrected
+      }
+    });
+    
+    expect(recorderWithInvalidBitrate).toBeInstanceOf(SlowTrackRecorder);
+  });
+
+  test('start() should handle streams with both video and audio tracks', async () => {
+    // Arrange: Set up recorder with audio config
+    const recorderWithAudio = new SlowTrackRecorder({
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrate: 2000000,
+      audio: {
+        enabled: true,
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000
+      }
+    });
+
+    // Set up worker mock to respond immediately
+    const originalPostMessage = mockWorker.postMessage;
+    mockWorker.postMessage = vi.fn((message, transferable) => {
+      // Call original to track the call
+      originalPostMessage(message, transferable);
+      
+      // Respond immediately with ready message
+      if (message.type === 'start') {
+        setTimeout(() => {
+          if (mockWorker.onmessage) {
+            const responseEvent = {
+              data: { type: 'ready' } as RecorderWorkerResponse
+            } as MessageEvent<RecorderWorkerResponse>;
+            mockWorker.onmessage(responseEvent);
+          }
+        }, 0);
+      }
+    });
+
+    // Act: Start recording with audio stream
+    await recorderWithAudio.start(mockMediaStreamWithAudio as unknown as MediaStream);
+    
+    // Assert: Verify worker received message with both streams
+    expect(mockWorker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'start',
+        stream: mockReadableStream,
+        audioStream: mockReadableStream
+      }),
+      expect.arrayContaining([mockReadableStream, mockReadableStream])
+    );
+  });
+
+  test('start() should gracefully handle missing audio tracks when audio enabled', async () => {
+    // Arrange: Recorder with audio enabled but stream without audio
+    const recorderWithAudio = new SlowTrackRecorder({
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrate: 2000000,
+      audio: {
+        enabled: true,
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000
+      }
+    });
+
+    // Set up worker mock to respond immediately
+    const originalPostMessage = mockWorker.postMessage;
+    mockWorker.postMessage = vi.fn((message, transferable) => {
+      // Call original to track the call
+      originalPostMessage(message, transferable);
+      
+      // Respond immediately with ready message
+      if (message.type === 'start') {
+        setTimeout(() => {
+          if (mockWorker.onmessage) {
+            const responseEvent = {
+              data: { type: 'ready' } as RecorderWorkerResponse
+            } as MessageEvent<RecorderWorkerResponse>;
+            mockWorker.onmessage(responseEvent);
+          }
+        }, 0);
+      }
+    });
+
+    // Act: Start recording with video-only stream
+    await recorderWithAudio.start(mockMediaStream as unknown as MediaStream);
+    
+    // Assert: Verify worker received message with only video stream
+    expect(mockWorker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'start',
+        stream: mockReadableStream,
+        audioStream: undefined
+      }),
+      [mockReadableStream]
+    );
   });
 });
