@@ -48,6 +48,7 @@ jobs:
           mkdir -p deploy
           cp packages/@beings/core/manual-test.html deploy/
           cp -r packages/@beings/core/dist deploy/
+          touch deploy/.nojekyll
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
