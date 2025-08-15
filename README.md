@@ -13,7 +13,7 @@ A framework-agnostic WebCodecs-based screen recording library with advanced vide
 
 ## Live Demo
 
-🚀 **[Try the Live Demo](https://beings-beam.github.io/beings-webcodecs-0.1/packages/@beings/core/manual-test.html)**
+🚀 **[Try the Live Demo](https://beings-beam.github.io/beings-webcodecs-0.1/manual-test.html)**
 
 The demo includes:
 - Real-time screen recording preview
