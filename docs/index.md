@@ -1,6 +1,6 @@
 # Beings Recorder Documentation
 
-The **Beings Recorder** is a secure, high-fidelity video and audio capture tool designed to create the definitive source of truth for qualitative research by prioritising accuracy and data integrity.
+The **Beings Recorder** is a secure, high-fidelity video and audio capture tool designed to create the definitive source of truth for qualitative research by prioritising accuracy and data integrity. The core engine features intelligent multi-codec support (AV1, HEVC, H.264, VP9) with automatic hardware optimization and comprehensive diagnostic capabilities.
 
 This repository follows a **"Docs-as-Code"** approach, keeping all documentation version-controlled alongside the codebase to ensure consistency and maintainability.
 
@@ -31,6 +31,7 @@ This repository follows a **"Docs-as-Code"** approach, keeping all documentation
 - [Development Setup](./engineering-hub.md#development-setup)
 - [Engineering Principles](./engineering-hub.md#principles)
 - [Technical Design Documents](./tdd/)
+- [Implementation Status](./IMPLEMENTATION_LOG.md) - Current development status and technical achievements
 
 ### For Operations Teams
 - [Deployment Guidelines](./engineering-hub.md#deployment)

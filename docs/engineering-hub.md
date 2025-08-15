@@ -76,14 +76,15 @@ The Beings Recorder implements a **client-centric architecture** that rejects tr
 ### Technology Stack
 
 **Client-Side (Browser)**
-- **Framework**: React 18 with TypeScript for UI components
+- **Framework**: React 18 with TypeScript for UI components (framework-agnostic core engine)
 - **Build Tool**: Vite for fast development and optimized builds
 - **Package Manager**: pnpm for efficient dependency management
 - **Media APIs**: WebRTC, WebCodecs, getUserMedia, getDisplayMedia
 - **Storage**: IndexedDB for local buffering and offline capability
-- **Encryption**: Web Crypto API for AES-GCM encryption
-- **Upload**: TUS protocol for resumable uploads
-- **Audio Processing**: WASM-based FLAC encoder for enhanced compression
+- **Encryption**: Web Crypto API for AES-GCM encryption (planned)
+- **Upload**: TUS protocol for resumable uploads (planned)
+- **Video Processing**: Multi-codec support (AV1, HEVC, H.264, VP9) with intelligent fallback
+- **Audio Processing**: Multi-format encoding (Opus, AAC, MP3, FLAC) with channel upmixing
 
 **Cloud Infrastructure**
 - **Connectivity**: STUNner (STUN/TURN), mediasoup (SFU)
@@ -127,15 +128,25 @@ pnpm build
 
 ### Repository Structure
 ```
-beings-recorder/
+beings-webcodecs-0.1/
 ├── packages/
-│   ├── app/          # Main React application
-│   ├── core/         # Core recording logic (migrated from audio-record-repo-dev)
-│   ├── react/        # React-specific utilities
-│   └── ui/           # Shared UI components
+│   └── @beings/
+│       └── core/     # Framework-agnostic recording engine
+│           ├── src/
+│           │   ├── SlowTrackRecorder.ts    # Main recorder class
+│           │   ├── recorder.worker.ts     # WebCodecs worker
+│           │   ├── types.ts               # TypeScript interfaces
+│           │   └── index.ts               # Public API exports
+│           ├── manual-test.html           # Comprehensive test harness
+│           └── package.json               # Dependencies: mp4-muxer, webm-muxer
 ├── docs/             # Project documentation
-└── public/           # Static assets
+└── test-deploy/      # Deployment testing assets
 ```
+
+### Core Package Dependencies
+The `@beings/core` package maintains minimal runtime dependencies:
+- **`mp4-muxer` (^4.0.0)**: Professional MP4 container creation for H.264/HEVC codecs
+- **`webm-muxer` (^2.0.0)**: WebM container creation for AV1/VP9 codecs
 
 ## 🔐 Security & Privacy
 
@@ -243,10 +254,11 @@ Generation      chunk                         Verification  Storage
 - **Quality**: Lossless capture with no audio dropouts
 
 **Video Quality**
-- **Resolution**: Up to 1080p30 (adaptive based on hardware)
-- **Codec**: H.264 via WebCodecs (primary), fallback to MediaRecorder
-- **Frame Rate**: Stable 30fps with <2% dropped frames (p95)
+- **Resolution**: Up to 4K with intelligent downscaling (adaptive based on hardware)
+- **Codec**: Intelligent 4-tier fallback (AV1 → HEVC → H.264 → VP9) via WebCodecs with hardware acceleration preference
+- **Frame Rate**: Stable 30fps with <2% dropped frames (p95), dynamic frame rate support
 - **Synchronization**: Frame-accurate alignment with audio tracks
+- **Container**: Dynamic MP4/WebM selection based on codec compatibility
 
 ## 🧪 Testing Strategy
 
@@ -318,8 +330,8 @@ For detailed technical specifications, see the [TDD directory](./tdd/):
 - **[Requirements Traceability](./tdd/requirements-traceability.md)** - Mapping between PRD requirements and technical implementation
 
 ### Media Processing
-- **[Audio Capture & Processing](./tdd/audio-capture.md)** - WAV/FLAC recording and quality requirements
-- **[Video Capture & Processing](./tdd/video-capture.md)** - WebCodecs implementation and MediaRecorder fallbacks
+- **[Audio Capture & Processing](./tdd/audio-capture.md)** - Multi-codec audio (Opus, AAC, MP3, FLAC) with channel upmixing and sample rate preservation
+- **[Video Capture & Processing](./tdd/video-capture.md)** - 4-tier codec fallback (AV1 → HEVC → H.264 → VP9) with intelligent downscaling
 - **[Screen Capture Specification](./tdd/screen-capture.md)** - getDisplayMedia and system audio handling
 
 ### Connectivity & Networking
