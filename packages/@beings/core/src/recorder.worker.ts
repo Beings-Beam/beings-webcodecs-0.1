@@ -519,31 +519,35 @@ async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'o
       const fallbackConfigs = [];
       
       if (finalAudioConfig.codec === 'aac') {
-        // AAC fallbacks - try different channel counts and bitrates at original sample rate
+        // AAC fallbacks - try to preserve original channel count first, then change channels as last resort
         fallbackConfigs.push(
-          // Try stereo instead of mono (keeping original sample rate)
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
-          // Try different bitrates with stereo
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
-          // Try different bitrates with mono
+          // First priority: Try different bitrates with ORIGINAL channel count
+          { ...audioEncoderConfig, bitrate: 192000 },
+          { ...audioEncoderConfig, bitrate: 128000 },
           { ...audioEncoderConfig, bitrate: 96000 },
           { ...audioEncoderConfig, bitrate: 64000 },
-          // Try minimal config at original sample rate
+          // Second priority: Only if original channel count fails, try stereo
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 192000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
+          // Last resort: Try minimal config
           { codec: 'mp4a.40.2', sampleRate: originalSampleRate, numberOfChannels: 2, bitrate: 128000 }
         );
       } else if (finalAudioConfig.codec === 'opus') {
-        // Opus fallbacks - try different channel counts and bitrates at original sample rate
+        // Opus fallbacks - try to preserve original channel count first, then change channels as last resort
         fallbackConfigs.push(
-          // Try stereo instead of mono (keeping original sample rate)
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
-          // Try different bitrates with stereo
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
-          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
-          // Try different bitrates with mono
+          // First priority: Try different bitrates with ORIGINAL channel count
+          { ...audioEncoderConfig, bitrate: 192000 },
+          { ...audioEncoderConfig, bitrate: 128000 },
           { ...audioEncoderConfig, bitrate: 96000 },
           { ...audioEncoderConfig, bitrate: 64000 },
-          // Try minimal config at original sample rate
+          // Second priority: Only if original channel count fails, try stereo
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 192000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 128000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 96000 },
+          { ...audioEncoderConfig, numberOfChannels: 2, bitrate: 64000 },
+          // Last resort: Try minimal config
           { codec: 'opus', sampleRate: originalSampleRate, numberOfChannels: 2, bitrate: 128000 }
         );
       }

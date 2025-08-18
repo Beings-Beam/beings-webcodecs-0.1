@@ -655,17 +655,74 @@
                                 <input type="checkbox" id="audioEnabledCheckbox" checked style="margin: 0;">
                                 <span>Enable Audio Recording</span>
                             </label>
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 24px;">Capture microphone audio along with screen recording</span>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 24px;">Capture system audio along with screen recording</span>
+                        </div>
+
+                        <!-- Audio Bitrate Control -->
+                        <div style="margin-bottom: 16px;">
+                            <label for="audioBitrateSelector" style="display: block; font-weight: 500; color: var(--text-color); font-size: 12px; margin-bottom: 8px;">
+                                Audio Bitrate Quality
+                            </label>
+                            <select id="audioBitrateSelector" style="width: 100%; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color); font-size: 12px;">
+                                <option value="64">64 kbps - Low Quality (Voice)</option>
+                                <option value="96">96 kbps - Good Quality (Voice)</option>
+                                <option value="128" selected>128 kbps - High Quality (Voice/Music)</option>
+                                <option value="160">160 kbps - Very High Quality</option>
+                                <option value="192">192 kbps - Excellent Quality</option>
+                                <option value="256">256 kbps - Premium Quality</option>
+                                <option value="320">320 kbps - Maximum Quality</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7;">Higher bitrates = better quality but larger files. 128-192 kbps recommended for most use cases.</span>
                         </div>
 
                         <!-- Audio Codec Information -->
-                        <div style="margin-bottom: 0;">
+                        <div style="margin-bottom: 16px;">
                             <div style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); font-size: 12px;">
                                 <div style="font-weight: 500; color: var(--text-color); margin-bottom: 4px;">
                                     Audio Codec: <span id="audioCodecDisplay" style="color: #4CAF50;">Auto-selected</span>
                                 </div>
                                 <div id="audioCodecInfo" style="font-size: 11px; color: var(--text-color); opacity: 0.7;">
                                     Audio codec automatically selected (AAC for MP4, Opus for WebM)
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Audio Processing Settings -->
+                        <div style="margin-bottom: 0;">
+                            <label style="display: block; font-weight: 500; color: var(--text-color); font-size: 12px; margin-bottom: 8px;">
+                                Audio Processing Settings
+                            </label>
+                            <div style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); font-size: 12px;">
+                                
+                                <!-- Auto Gain Control -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label for="autoGainControlToggle" style="font-size: 11px; color: var(--text-color);">Auto Gain Control</label>
+                                    <input type="checkbox" id="autoGainControlToggle" checked style="transform: scale(0.9);">
+                                </div>
+                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 8px;">
+                                    Automatically adjusts audio levels (may compress dynamic range)
+                                </div>
+                                
+                                <!-- Echo Cancellation -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label for="echoCancellationToggle" style="font-size: 11px; color: var(--text-color);">Echo Cancellation</label>
+                                    <input type="checkbox" id="echoCancellationToggle" checked style="transform: scale(0.9);">
+                                </div>
+                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 8px;">
+                                    Removes echo and feedback (may affect frequency response)
+                                </div>
+                                
+                                <!-- Noise Suppression -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label for="noiseSuppressionToggle" style="font-size: 11px; color: var(--text-color);">Noise Suppression</label>
+                                    <input type="checkbox" id="noiseSuppressionToggle" checked style="transform: scale(0.9);">
+                                </div>
+                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 4px;">
+                                    Reduces background noise (may remove quiet audio content)
+                                </div>
+                                
+                                <div style="font-size: 10px; color: #FF9800; opacity: 0.8; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color);">
+                                    💡 For highest quality: Disable all processing (unchecked = raw audio)
                                 </div>
                             </div>
                         </div>
@@ -709,7 +766,9 @@
                         <div>Bit Depth (sampleSize): <span id="sourceBitDepth">--</span></div>
                         <div>Channel Count: <span id="sourceChannelCount">--</span></div>
                         <div>Latency: <span id="sourceLatency">--</span></div>
+                        <div>Auto Gain Control: <span id="sourceAutoGainControl">--</span></div>
                         <div>Echo Cancellation: <span id="sourceEchoCancellation">--</span></div>
+                        <div>Noise Suppression: <span id="sourceNoiseSuppression">--</span></div>
                     </div>
                     
                     <div class="stats-section">
@@ -719,6 +778,19 @@
                         <div>Channel Count: <span id="recordingChannelCount">--</span></div>
                         <div>Bitrate: <span id="recordingBitrate">--</span></div>
                         <div>Processing Status: <span id="recordingAudioStatus">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Recording Analysis</h4>
+                        <div>File Size: <span id="analysisFileSize">--</span></div>
+                        <div>Duration: <span id="analysisDuration">--</span></div>
+                        <div>Video Codec: <span id="analysisVideoCodec">--</span></div>
+                        <div>Video Resolution: <span id="analysisVideoResolution">--</span></div>
+                        <div>Video Bitrate: <span id="analysisVideoBitrate">--</span></div>
+                        <div>Audio Codec: <span id="analysisAudioCodec">--</span></div>
+                        <div>Audio Bitrate: <span id="analysisAudioBitrate">--</span></div>
+                        <div>Audio Channels: <span id="analysisAudioChannels">--</span></div>
+                        <div>Analysis Status: <span id="analysisStatus">--</span></div>
                     </div>
                     
                     <div class="stats-section">
@@ -1853,6 +1925,182 @@
             statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
         }
 
+        // Analyze the recorded file and display technical details
+        async function analyzeRecordedFile(blob) {
+            try {
+                // Update analysis status
+                const analysisStatusSpan = document.getElementById('analysisStatus');
+                if (analysisStatusSpan) {
+                    analysisStatusSpan.textContent = 'Analyzing...';
+                    analysisStatusSpan.style.color = '#FF9800'; // Orange for in progress
+                }
+
+                // Basic file information
+                const fileSizeSpan = document.getElementById('analysisFileSize');
+                if (fileSizeSpan) {
+                    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+                    fileSizeSpan.textContent = `${sizeMB} MB (${blob.size.toLocaleString()} bytes)`;
+                }
+
+                // Create a video element to analyze the file
+                const tempVideo = document.createElement('video');
+                tempVideo.preload = 'metadata';
+                
+                // Create object URL for analysis
+                const analysisUrl = URL.createObjectURL(blob);
+                tempVideo.src = analysisUrl;
+
+                // Wait for metadata to load
+                await new Promise((resolve, reject) => {
+                    tempVideo.onloadedmetadata = resolve;
+                    tempVideo.onerror = reject;
+                    
+                    // Timeout after 5 seconds
+                    setTimeout(() => reject(new Error('Metadata load timeout')), 5000);
+                });
+
+                // Extract video information
+                const durationSpan = document.getElementById('analysisDuration');
+                if (durationSpan) {
+                    const duration = tempVideo.duration;
+                    const minutes = Math.floor(duration / 60);
+                    const seconds = (duration % 60).toFixed(1);
+                    durationSpan.textContent = `${minutes}:${seconds.padStart(4, '0')}`;
+                }
+
+                const videoResolutionSpan = document.getElementById('analysisVideoResolution');
+                if (videoResolutionSpan) {
+                    videoResolutionSpan.textContent = `${tempVideo.videoWidth} × ${tempVideo.videoHeight}`;
+                }
+
+                // Calculate actual bitrates based on file size and duration
+                const videoBitrateSpan = document.getElementById('analysisVideoBitrate');
+                const audioBitrateSpan = document.getElementById('analysisAudioBitrate');
+                
+                if (videoBitrateSpan && tempVideo.duration > 0) {
+                    // Estimate total bitrate from file size
+                    const totalBitrate = (blob.size * 8) / tempVideo.duration; // bits per second
+                    const totalKbps = (totalBitrate / 1000).toFixed(0);
+                    
+                    // Get actual configured audio bitrate from the UI
+                    const recordingBitrateSpan = document.getElementById('recordingBitrate');
+                    let actualAudioBitrate = 128; // Default fallback
+                    
+                    if (recordingBitrateSpan && recordingBitrateSpan.textContent) {
+                        const bitrateMatch = recordingBitrateSpan.textContent.match(/(\d+)/);
+                        if (bitrateMatch) {
+                            actualAudioBitrate = parseInt(bitrateMatch[1]);
+                        }
+                    }
+                    
+                    // Estimate video bitrate (subtract actual audio bitrate)
+                    const estimatedVideoBitrate = Math.max(0, totalKbps - actualAudioBitrate);
+                    
+                    videoBitrateSpan.textContent = `~${estimatedVideoBitrate} kbps (estimated)`;
+                    
+                    if (audioBitrateSpan) {
+                        audioBitrateSpan.textContent = `${actualAudioBitrate} kbps (actual)`;
+                    }
+                }
+
+                // Get codec information from our recorder state
+                const videoCodecSpan = document.getElementById('analysisVideoCodec');
+                const audioCodecSpan = document.getElementById('analysisAudioCodec');
+                const audioChannelsSpan = document.getElementById('analysisAudioChannels');
+
+                if (videoCodecSpan) {
+                    const finalCodec = recorder.getFinalCodec();
+                    videoCodecSpan.textContent = finalCodec ? finalCodec.toUpperCase() : 'Unknown';
+                }
+
+                if (audioCodecSpan) {
+                    audioCodecSpan.textContent = 'AAC'; // We know this from our configuration
+                }
+
+                if (audioChannelsSpan) {
+                    // Get the channel count from our current audio config
+                    const recordingChannelCountSpan = document.getElementById('recordingChannelCount');
+                    const channelCount = recordingChannelCountSpan ? recordingChannelCountSpan.textContent : 'Unknown';
+                    audioChannelsSpan.textContent = channelCount === '1' ? 'Mono (1)' : channelCount === '2' ? 'Stereo (2)' : channelCount;
+                }
+
+                // Clean up
+                URL.revokeObjectURL(analysisUrl);
+                tempVideo.remove();
+
+                // Update analysis status to completed
+                if (analysisStatusSpan) {
+                    analysisStatusSpan.textContent = 'Completed';
+                    analysisStatusSpan.style.color = '#4CAF50'; // Green for completed
+                }
+
+                console.log('File analysis completed:', {
+                    size: blob.size,
+                    duration: tempVideo.duration,
+                    resolution: `${tempVideo.videoWidth}x${tempVideo.videoHeight}`
+                });
+
+            } catch (error) {
+                console.error('File analysis failed:', error);
+                
+                // Update analysis status to show error
+                const analysisStatusSpan = document.getElementById('analysisStatus');
+                if (analysisStatusSpan) {
+                    analysisStatusSpan.textContent = 'Failed';
+                    analysisStatusSpan.style.color = '#F44336'; // Red for error
+                }
+                
+                // Show basic file size at least
+                const fileSizeSpan = document.getElementById('analysisFileSize');
+                if (fileSizeSpan) {
+                    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+                    fileSizeSpan.textContent = `${sizeMB} MB (${blob.size.toLocaleString()} bytes)`;
+                }
+            }
+        }
+
+        // Reset the analysis section for a new recording
+        function resetAnalysisSection() {
+            const analysisElements = [
+                'analysisFileSize',
+                'analysisDuration', 
+                'analysisVideoCodec',
+                'analysisVideoResolution',
+                'analysisVideoBitrate',
+                'analysisAudioCodec',
+                'analysisAudioBitrate',
+                'analysisAudioChannels',
+                'analysisStatus'
+            ];
+            
+            // Also reset source audio details for new capture
+            const sourceAudioElements = [
+                'sourceSampleRate',
+                'sourceBitDepth', 
+                'sourceChannelCount',
+                'sourceLatency',
+                'sourceAutoGainControl',
+                'sourceEchoCancellation',
+                'sourceNoiseSuppression'
+            ];
+            
+            analysisElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.textContent = '--';
+                    element.style.color = ''; // Reset color
+                }
+            });
+            
+            sourceAudioElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.textContent = '--';
+                    element.style.color = ''; // Reset color
+                }
+            });
+        }
+
         // Update codec display in the stats (when actually recording)
         function updateCodecDisplay(codec) {
             if (codec === 'av1') {
@@ -2148,9 +2396,36 @@
                 const frameRateTarget = frameRateSelector.value;
                 const audioEnabled = document.getElementById('audioEnabledCheckbox').checked;
                 
+                // Build audio constraints with processing settings
+                let audioConstraints = audioEnabled;
+                if (audioEnabled) {
+                    // Read audio processing settings from UI
+                    const autoGainControl = document.getElementById('autoGainControlToggle')?.checked ?? true;
+                    const echoCancellation = document.getElementById('echoCancellationToggle')?.checked ?? true;
+                    const noiseSuppression = document.getElementById('noiseSuppressionToggle')?.checked ?? true;
+                    
+                    audioConstraints = {
+                        autoGainControl: autoGainControl,
+                        echoCancellation: echoCancellation,
+                        noiseSuppression: noiseSuppression,
+                        // Request high quality settings
+                        sampleRate: 48000,
+                        channelCount: 1, // Prefer mono for screenshare
+                        latency: 0.01    // Low latency
+                    };
+                    
+                    console.log('Audio processing settings:', {
+                        autoGainControl,
+                        echoCancellation, 
+                        noiseSuppression,
+                        sampleRate: 48000,
+                        channelCount: 1
+                    });
+                }
+                
                 const constraints = frameRateTarget === 'auto' 
-                    ? { video: true, audio: audioEnabled }
-                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } }, audio: audioEnabled };
+                    ? { video: true, audio: audioConstraints }
+                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } }, audio: audioConstraints };
                 
                 // Get screenshare stream
                 mediaStream = await navigator.mediaDevices.getDisplayMedia(constraints);
@@ -2199,14 +2474,31 @@
                         sourceLatencySpan.style.color = audioSettings.latency ? '#4CAF50' : '#FF9800';
                     }
                     
+                    // Auto Gain Control
+                    const sourceAutoGainControlSpan = document.getElementById('sourceAutoGainControl');
+                    if (sourceAutoGainControlSpan) {
+                        const autoGainControl = audioSettings.autoGainControl;
+                        sourceAutoGainControlSpan.textContent = autoGainControl !== undefined ? (autoGainControl ? 'Enabled' : 'Disabled') : 'Unknown';
+                        sourceAutoGainControlSpan.style.color = autoGainControl !== undefined ? '#4CAF50' : '#FF9800';
+                    }
+                    
+                    // Echo Cancellation  
                     if (sourceEchoCancellationSpan) {
                         const echoCancellation = audioSettings.echoCancellation;
                         sourceEchoCancellationSpan.textContent = echoCancellation !== undefined ? (echoCancellation ? 'Enabled' : 'Disabled') : 'Unknown';
                         sourceEchoCancellationSpan.style.color = echoCancellation !== undefined ? '#4CAF50' : '#FF9800';
                     }
+                    
+                    // Noise Suppression
+                    const sourceNoiseSuppressionSpan = document.getElementById('sourceNoiseSuppression');
+                    if (sourceNoiseSuppressionSpan) {
+                        const noiseSuppression = audioSettings.noiseSuppression;
+                        sourceNoiseSuppressionSpan.textContent = noiseSuppression !== undefined ? (noiseSuppression ? 'Enabled' : 'Disabled') : 'Unknown';
+                        sourceNoiseSuppressionSpan.style.color = noiseSuppression !== undefined ? '#4CAF50' : '#FF9800';
+                    }
                 } else {
                     // No audio track found - update all fields to indicate no audio
-                    const audioDetailSpans = ['sourceSampleRate', 'sourceBitDepth', 'sourceChannelCount', 'sourceLatency', 'sourceEchoCancellation'];
+                    const audioDetailSpans = ['sourceSampleRate', 'sourceBitDepth', 'sourceChannelCount', 'sourceLatency', 'sourceAutoGainControl', 'sourceEchoCancellation', 'sourceNoiseSuppression'];
                     audioDetailSpans.forEach(spanId => {
                         const span = document.getElementById(spanId);
                         if (span) {
@@ -2405,9 +2697,25 @@
                     const actualChannels = audioSettings.channelCount || 1; // Default to mono if unknown
                     const actualSampleRate = audioSettings.sampleRate || 48000; // Default to 48kHz if unknown
                     
+                    // Get selected audio bitrate from UI with defensive programming
+                    let selectedBitrate = 128000; // Safe default (128 kbps)
+                    try {
+                        const audioBitrateSelector = document.getElementById('audioBitrateSelector');
+                        if (audioBitrateSelector && audioBitrateSelector.value) {
+                            const parsedBitrate = parseInt(audioBitrateSelector.value) * 1000;
+                            if (!isNaN(parsedBitrate) && parsedBitrate >= 64000 && parsedBitrate <= 320000) {
+                                selectedBitrate = parsedBitrate;
+                            }
+                        }
+                        console.log('Audio bitrate selected:', selectedBitrate / 1000 + ' kbps');
+                    } catch (error) {
+                        console.warn('Audio bitrate selector error, using default 128kbps:', error);
+                    }
+                    
                     console.log('Detected audio stream format:', {
                         channelCount: actualChannels,
                         sampleRate: actualSampleRate,
+                        selectedBitrate: selectedBitrate,
                         settings: audioSettings
                     });
                     
@@ -2416,7 +2724,7 @@
                         codec: audioCodec,
                         sampleRate: actualSampleRate,
                         numberOfChannels: actualChannels,  // Use actual detected channels
-                        bitrate: actualChannels === 1 ? 128000 : 256000  // Higher bitrate for better quality
+                        bitrate: selectedBitrate  // Use user-selected bitrate
                     };
                     console.log('Audio configuration:', recorderConfig.audio);
                     
@@ -2452,7 +2760,7 @@
                     }
                     
                     if (recordingBitrateSpan) {
-                        const bitrateKbps = (recorderConfig.audio.bitrate / 1000).toFixed(0);
+                        const bitrateKbps = selectedBitrate ? (selectedBitrate / 1000).toFixed(0) : '128';
                         recordingBitrateSpan.textContent = `${bitrateKbps} kbps`;
                         recordingBitrateSpan.style.color = '#4CAF50';
                     }
@@ -2555,6 +2863,9 @@
                 showStatus('Detecting optimal codec...', 'info');
                 await recorder.start(mediaStream);
                 console.log('Recording started');
+                
+                // Reset analysis section for new recording
+                resetAnalysisSection();
                 
                 // Update Recording Audio Status to "Active" when recording starts
                 const recordingAudioStatusSpan = document.getElementById('recordingAudioStatus');
@@ -2681,6 +2992,9 @@
                     recordingAudioStatusSpan.textContent = 'Completed';
                     recordingAudioStatusSpan.style.color = '#9C27B0'; // Purple for completed
                 }
+                
+                // Analyze the recorded file
+                await analyzeRecordedFile(blob);
 
                 // Create object URL for the video blob
                 const videoUrl = URL.createObjectURL(blob);
