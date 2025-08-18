@@ -67,6 +67,32 @@ export class SlowTrackRecorder {
   #startPromiseReject: ((error: Error) => void) | null = null;
   #lastResult: RecordingResult | null = null;
 
+  /** Flag to signal processing loops to terminate early */
+  #shouldStopProcessing = false;
+
+  /** High-resolution monotonic timestamp of when recording started. The 'zero' point for the session. */
+  #recordingStartTime: number | null = null;
+
+  /** The timestamp of the very first video frame received, used as the baseline for normalization. */
+  #firstVideoTimestamp: number | null = null;
+
+  /** The timestamp of the very first audio frame received, used as the baseline for normalization. */
+  #firstAudioTimestamp: number | null = null;
+
+  /** TransformStream for processing and timestamping video frames before sending to the worker. */
+  #videoTransformStream: TransformStream<VideoFrame, VideoFrame> | null = null;
+
+  /** TransformStream for processing and timestamping audio data before sending to the worker. */
+  #audioTransformStream: TransformStream<AudioData, AudioData> | null = null;
+
+  /** Minimal diagnostic counters */
+  #videoFrameCount = 0;
+  #lastDiagnosticTime = 0;
+
+
+
+
+
   /**
    * Check if the SlowTrackRecorder is supported in the current environment
    * 
@@ -175,6 +201,42 @@ export class SlowTrackRecorder {
         }
       });
     }
+  }
+
+  /**
+   * Handle fatal errors in processing loops with centralized cleanup
+   * 
+   * @param error - The error that occurred in a processing loop
+   */
+  #handleFatalError(error: any): void {
+    // Prevent duplicate cleanup calls
+    if (!this.#isRecording) {
+      return;
+    }
+
+    console.error('SlowTrackRecorder: Fatal error in processing loop:', error);
+    
+    // Signal all loops to terminate
+    this.#shouldStopProcessing = true;
+    this.#isRecording = false;
+    
+    // Comprehensive cleanup
+    if (this.#worker) {
+      this.#worker.terminate();
+      this.#worker = null;
+    }
+    
+    // Reset all state
+    this.#isWorkerReady = false;
+    this.#recordingStartTime = null;
+    this.#videoTransformStream = null;
+    this.#audioTransformStream = null;
+    this.#videoFrameCount = 0;
+    this.#lastDiagnosticTime = 0;
+    
+    // Create proper error object and emit
+    const fatalError = error instanceof Error ? error : new Error(String(error || 'Unknown processing error'));
+    this.#emit('error', fatalError);
   }
 
   /**
@@ -306,106 +368,114 @@ export class SlowTrackRecorder {
    */
   async start(stream: MediaStream): Promise<void> {
     try {
-      // Validate State: Check if already recording
+      // 1. Validate State & Set Timebase
       if (this.#isRecording) {
         throw new Error('Recording already in progress');
       }
-      
-      // Clear previous recording result for new recording
       this.#lastResult = null;
+      this.#shouldStopProcessing = false; // Reset processing flag for new recording
+      this.#videoFrameCount = 0;
+      this.#lastDiagnosticTime = 0;
+      this.#recordingStartTime = performance.now();
 
-      // Extract Tracks: Get both video and audio tracks from the stream
-      const videoTracks = stream.getVideoTracks();
-      const audioTracks = stream.getAudioTracks();
-      
-      if (videoTracks.length === 0) {
+      // 2. Extract Tracks
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+      if (!videoTrack) {
         throw new Error('No video tracks found in the provided MediaStream');
       }
-      
-      const videoTrack = videoTracks[0];
-      const audioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
-      
-      // Audio Configuration Check: Validate audio availability vs config
-      const audioEnabled = this.#config.audio?.enabled === true;
-      const hasAudio = audioTrack !== null && audioEnabled;
-      
-      if (audioEnabled && !audioTrack) {
-        console.warn('SlowTrackRecorder: Audio enabled in config but no audio tracks found in stream, proceeding with video-only recording');
+
+      const audioEnabled = this.#config.audio?.enabled === true && !!audioTrack;
+      if (this.#config.audio?.enabled && !audioTrack) {
+        console.warn('SlowTrackRecorder: Audio enabled in config but no audio track found in stream. Proceeding with video-only recording.');
       }
 
-      // Initialize Worker: Create new worker instance
+      // 3. Initialize Worker
       this.#worker = new Worker(
-        new URL('./recorder.worker.ts', import.meta.url), 
+        new URL('./recorder.worker.ts', import.meta.url),
         { type: 'module' }
       );
-
-      // Attach Message Handler: Listen for messages from worker
       this.#worker.onmessage = this.#handleWorkerMessage.bind(this);
 
-      // Create Stream Processors: Convert tracks to readable streams
+      // 4. Create and Manage Processing Pipeline
+      // Use larger buffer to let worker handle intelligent backpressure management
+      this.#videoTransformStream = new TransformStream<VideoFrame, VideoFrame>(undefined, undefined, {
+        highWaterMark: 200, // Much larger buffer to prevent MediaStreamTrackProcessor throttling
+        size: () => 1
+      });
       const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack } as MediaStreamTrackProcessorInit);
-      const videoStream = videoProcessor.readable;
-      
-      let audioStream: ReadableStream<AudioData> | undefined;
-      if (hasAudio) {
-        try {
-          const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack } as MediaStreamTrackProcessorInit);
-          audioStream = audioProcessor.readable;
-        } catch (error) {
-          console.warn('SlowTrackRecorder: Failed to create audio processor, proceeding with video-only:', error);
-          audioStream = undefined;
-        }
+      const videoReader = videoProcessor.readable.getReader();
+      const videoWriter = this.#videoTransformStream.writable.getWriter();
+
+      const processingPromises: Promise<void>[] = [
+        this.#processVideoStream(videoReader, videoWriter)
+      ];
+
+      let audioStreamForWorker: ReadableStream<AudioData> | undefined;
+
+      if (audioEnabled) {
+        this.#audioTransformStream = new TransformStream<AudioData, AudioData>(undefined, undefined, {
+          highWaterMark: 300, // Much larger buffer for audio to prevent throttling
+          size: () => 1
+        });
+        const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack } as MediaStreamTrackProcessorInit);
+        const audioReader = audioProcessor.readable.getReader();
+        const audioWriter = this.#audioTransformStream.writable.getWriter();
+        processingPromises.push(this.#processAudioStream(audioReader, audioWriter));
+        audioStreamForWorker = this.#audioTransformStream.readable;
       }
 
-      // Post Message: Transfer streams to the worker
+      // Launch the processing loops in the background. If any of them fail,
+      // call the centralized fatal error handler.
+      Promise.all(processingPromises).catch(error => {
+        this.#handleFatalError(error);
+      });
+
+      // 5. Post Message to Worker
       const message = {
         type: 'start' as const,
         config: this.#config,
-        stream: videoStream,
-        audioStream: audioStream
+        stream: this.#videoTransformStream.readable,
+        audioStream: audioStreamForWorker
       };
-      
-      const transferables: Transferable[] = [videoStream];
-      if (audioStream) {
-        transferables.push(audioStream);
+
+      const transferables: Transferable[] = [this.#videoTransformStream.readable];
+      if (audioStreamForWorker) {
+        transferables.push(audioStreamForWorker);
       }
-      
       this.#worker.postMessage(message, transferables);
 
-      // Wait for worker initialization: Create promise to wait for 'ready' or 'error' message
+      // 6. Await Worker Readiness
       await new Promise<void>((resolve, reject) => {
         this.#startPromiseResolve = resolve;
         this.#startPromiseReject = reject;
-        
-        // Set a timeout to prevent infinite waiting
         setTimeout(() => {
           if (this.#startPromiseReject) {
-            this.#startPromiseReject(new Error('Worker initialization timeout - no response from worker after 10 seconds'));
+            this.#startPromiseReject(new Error('Worker initialization timeout after 10 seconds'));
             this.#startPromiseResolve = null;
             this.#startPromiseReject = null;
           }
-        }, 10000); // 10 second timeout
+        }, 10000);
       });
 
-      // Finalize State & Emit Event: Mark as recording and notify listeners
+      // 7. Finalize State
       this.#isRecording = true;
       this.#emit('start');
 
     } catch (error) {
-      // Clean Up: Terminate worker if it exists
+      // 8. Comprehensive Cleanup on Error
       if (this.#worker) {
         this.#worker.terminate();
         this.#worker = null;
       }
-
-      // Reset State: Ensure clean state after error
       this.#isRecording = false;
+      this.#shouldStopProcessing = false;
+      this.#recordingStartTime = null;
+      this.#videoTransformStream = null;
+      this.#audioTransformStream = null;
 
-      // Emit Error: Notify listeners of the error
       this.#emit('error', error instanceof Error ? error : new Error(String(error)));
-
-      // Re-throw to maintain async error propagation
-      throw error;
+      throw error; // Re-throw to caller
     }
   }
 
@@ -415,6 +485,9 @@ export class SlowTrackRecorder {
    * @returns Promise that resolves with the recorded video as a Blob
    */
   async stop(): Promise<Blob> {
+    // Signal processing loops to terminate gracefully first
+    this.#shouldStopProcessing = true;
+    
     // Idempotency Check: Prevent multiple stop calls
     if (!this.#isRecording) {
       throw new Error('Recording is not currently active');
@@ -468,6 +541,7 @@ export class SlowTrackRecorder {
 
     // Reset state
     this.#isWorkerReady = false;
+    this.#shouldStopProcessing = false;
   }
 
   /**
@@ -507,4 +581,208 @@ export class SlowTrackRecorder {
   getFinalCodec(): 'av1' | 'hevc' | 'h264' | 'vp9' | null {
     return this.#finalCodec;
   }
+
+  /**
+   * Processes a ReadableStream of video frames, normalizes their timestamps,
+   * and writes them to a WritableStream.
+   * @param reader - The reader for the raw video track stream.
+   * @param writer - The writer to send timestamped frames to the worker.
+   */
+  async #processVideoStream(
+    reader: ReadableStreamDefaultReader<VideoFrame>,
+    writer: WritableStreamDefaultWriter<VideoFrame>
+  ): Promise<void> {
+    try {
+      while (true) {
+        // Check if we should stop processing due to stop signal or error in another loop
+        if (this.#shouldStopProcessing) {
+          console.log('SlowTrackRecorder: Stop signal received, terminating video processing loop');
+          break;
+        }
+
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readError) {
+          // Stream was likely closed/cancelled during read - check if this is expected
+          if (this.#shouldStopProcessing) {
+            console.log('SlowTrackRecorder: Video stream read interrupted during stop - terminating gracefully');
+            break;
+          } else {
+            // Unexpected read error - re-throw
+            throw readError;
+          }
+        }
+
+        const { done, value: frame } = readResult;
+
+        if (done) {
+          break; // The stream has ended.
+        }
+
+        // We wrap the processing of each frame to ensure the original is always closed.
+        try {
+          this.#videoFrameCount++;
+          const now = performance.now();
+          
+          // Log every 5 seconds to diagnose frame rate
+          if (now - this.#lastDiagnosticTime > 5000) {
+            console.log(`🎬 Video frames received from MediaStreamTrackProcessor: ${this.#videoFrameCount} (${(this.#videoFrameCount / ((now - (this.#recordingStartTime || now)) / 1000)).toFixed(1)} fps)`);
+            this.#lastDiagnosticTime = now;
+          }
+          
+          // On the very first frame, capture its timestamp as the baseline for this track.
+          if (this.#firstVideoTimestamp === null) {
+            this.#firstVideoTimestamp = frame.timestamp;
+          }
+
+          // Calculate the normalized timestamp relative to the first frame.
+          const normalizedTimestamp = frame.timestamp - this.#firstVideoTimestamp;
+
+          // Create a new VideoFrame with the normalized timestamp, preserving other properties.
+          const normalizedFrame = new VideoFrame(frame, {
+            timestamp: normalizedTimestamp,
+            duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
+          });
+
+          // Forward the newly timestamped frame to the worker.
+          // Use non-blocking write to prevent main thread stalls
+          writer.write(normalizedFrame).catch(writeError => {
+            console.warn('SlowTrackRecorder: Video frame write failed (expected during high load):', writeError instanceof Error ? writeError.message : String(writeError));
+            // Don't throw - let the worker handle backpressure
+          });
+
+        } finally {
+          // CRITICAL: Close the original frame to release its underlying memory,
+          // even if the processing logic above throws an error.
+          frame.close();
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
+      console.error('SlowTrackRecorder: A fatal error occurred in the video processing loop.', errorMessage);
+      // Re-throw the original error to be caught by the processing promise handler.
+      throw error instanceof Error ? error : new Error(errorMessage);
+    } finally {
+      // Signal to the worker that no more video frames are coming.
+      try {
+        await writer.close();
+      } catch (closeError) {
+        // Stream might already be in an error state, which is expected during cleanup
+        console.warn('SlowTrackRecorder: Video writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
+      }
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Processes a ReadableStream of audio data, normalizes their timestamps,
+   * and writes them to a WritableStream.
+   * @param reader - The reader for the raw audio track stream.
+   * @param writer - The writer to send timestamped frames to the worker.
+   */
+  async #processAudioStream(
+    reader: ReadableStreamDefaultReader<AudioData>,
+    writer: WritableStreamDefaultWriter<AudioData>
+  ): Promise<void> {
+    try {
+      while (true) {
+        // Check if we should stop processing due to stop signal or error in another loop
+        if (this.#shouldStopProcessing) {
+          console.log('SlowTrackRecorder: Stop signal received, terminating audio processing loop');
+          break;
+        }
+
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readError) {
+          // Stream was likely closed/cancelled during read - check if this is expected
+          if (this.#shouldStopProcessing) {
+            console.log('SlowTrackRecorder: Audio stream read interrupted during stop - terminating gracefully');
+            break;
+          } else {
+            // Unexpected read error - re-throw
+            throw readError;
+          }
+        }
+
+        const { done, value: frame } = readResult;
+
+        if (done) {
+          break; // The stream has ended.
+        }
+
+        // We wrap the processing of each frame to ensure the original is always closed.
+        try {
+          // On the very first frame, capture its timestamp as the baseline for this track.
+          if (this.#firstAudioTimestamp === null) {
+            this.#firstAudioTimestamp = frame.timestamp;
+          }
+
+          // Calculate the normalized timestamp relative to the first frame.
+          const normalizedTimestamp = frame.timestamp - this.#firstAudioTimestamp;
+
+          // AudioData requires a manual copy of its underlying buffer.
+          // Correctly calculate the total buffer size needed for all audio channels.
+          let totalByteLength = 0;
+          for (let i = 0; i < frame.numberOfChannels; i++) {
+            totalByteLength += frame.allocationSize({ planeIndex: i });
+          }
+          const buffer = new ArrayBuffer(totalByteLength);
+          const bufferView = new Uint8Array(buffer);
+
+          // Copy the data from each channel (plane) into the new buffer sequentially.
+          let offset = 0;
+          for (let i = 0; i < frame.numberOfChannels; i++) {
+            const planeSize = frame.allocationSize({ planeIndex: i });
+            const planeBuffer = new ArrayBuffer(planeSize);
+            frame.copyTo(planeBuffer, { planeIndex: i });
+            
+            // Copy the plane's data into the main buffer at the correct offset.
+            bufferView.set(new Uint8Array(planeBuffer), offset);
+            offset += planeSize;
+          }
+
+          // Create a new AudioData object with the normalized timestamp and the complete, multi-channel buffer.
+          const normalizedFrame = new AudioData({
+            format: frame.format || 'f32-planar', // Default to f32-planar if format is null
+            sampleRate: frame.sampleRate,
+            numberOfFrames: frame.numberOfFrames,
+            numberOfChannels: frame.numberOfChannels,
+            timestamp: normalizedTimestamp,
+            data: buffer,
+          });
+
+          // Forward the newly timestamped frame to the worker.
+          // Use non-blocking write to prevent main thread stalls
+          writer.write(normalizedFrame).catch(writeError => {
+            console.warn('SlowTrackRecorder: Audio frame write failed (expected during high load):', writeError instanceof Error ? writeError.message : String(writeError));
+            // Don't throw - let the worker handle backpressure
+          });
+
+        } finally {
+          // CRITICAL: Close the original frame to release its underlying memory,
+          // even if the processing logic above throws an error.
+          frame.close();
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
+      console.error('SlowTrackRecorder: A fatal error occurred in the audio processing loop.', errorMessage);
+      // Re-throw the error so the top-level Promise.all can catch it for cleanup.
+      throw error instanceof Error ? error : new Error(errorMessage);
+    } finally {
+      // Signal to the worker that no more audio frames are coming.
+      try {
+        await writer.close();
+      } catch (closeError) {
+        // Stream might already be in an error state, which is expected during cleanup
+        console.warn('SlowTrackRecorder: Audio writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
+      }
+      reader.releaseLock();
+    }
+  }
 }
+
+

@@ -19,6 +19,7 @@ let muxer: any | null = null; // Will be Muxer<ArrayBufferTarget> | WebMMuxer af
 let mp4Target: any | null = null; // Will be ArrayBufferTarget after dynamic import
 let streamReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
 let currentCodec: string | null = null;
+let needsKeyFrame = false;
 
 // Audio pipeline state variables
 let audioEncoder: AudioEncoder | null = null;
@@ -52,6 +53,7 @@ const ENABLE_DRIFT_DETECTION = true;
 const SYNC_UPDATE_FRAME_INTERVAL = 30; // Send an update roughly once per second at 30fps
 let videoFramesProcessed = 0;
 let audioFramesProcessed = 0;
+let videoFramesDropped = 0;
 
 /**
  * Calculate scaled dimensions that fit within hardware limits while preserving aspect ratio
@@ -196,7 +198,7 @@ function convertF32toS16(audioData: AudioData): AudioData {
     const timestamp = audioData.timestamp;
     const duration = audioData.duration;
     
-    console.log(`Worker: Converting f32 to s16 - ${numberOfChannels} channels, ${numberOfFrames} frames @ ${sampleRate}Hz`);
+    // Converting f32 to s16 (logging reduced)
     
     // Calculate buffer size (interleaved format)
     const bufferSize = numberOfFrames * numberOfChannels;
@@ -222,7 +224,7 @@ function convertF32toS16(audioData: AudioData): AudioData {
       data: s16Buffer
     });
     
-    console.log(`Worker: ✅ Converted f32 to s16 - ${numberOfChannels} channels, ${numberOfFrames} frames`);
+    // Conversion complete (logging reduced)
     return s16AudioData;
     
   } catch (error) {
@@ -250,7 +252,7 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
     const duration = monoAudioData.duration;
     const originalFormat = monoAudioData.format;
     
-    console.log(`Worker: Upmixing mono to stereo - preserving original format: ${originalFormat}`);
+    // Upmixing mono to stereo (logging reduced)
     
     // Preserve the original format to prevent bit depth corruption
     // Check if the original format is 16-bit integer (s16 or s16-planar)
@@ -263,11 +265,11 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
       
       // Format-aware copying - check actual input format to prevent corruption
       const inputFormat = monoAudioData.format;
-      console.log(`Worker: Input format detected: ${inputFormat}, treating as 16-bit output`);
+      // Input format detected as 16-bit (logging reduced)
       
       if (inputFormat && inputFormat.startsWith('f32')) {
         // Source is 32-bit float, convert to 16-bit integer
-        console.log('Worker: Converting float32 input to int16 output');
+        // Converting float32 input to int16 output (logging reduced)
         const monoBuffer = new Float32Array(numberOfFrames);
         monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
         
@@ -281,7 +283,7 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
         
       } else if (inputFormat && inputFormat.startsWith('s16')) {
         // Source is already 16-bit integer, just copy directly (no conversion!)
-        console.log('Worker: Copying int16 input to int16 output (no conversion)');
+        // Copying int16 input to int16 output (logging reduced)
         const monoBuffer = new Int16Array(numberOfFrames);
         monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
         
@@ -307,7 +309,7 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
         data: stereoBuffer
       });
       
-      console.log(`Worker: ✅ Upmixed mono to stereo - preserved 16-bit format - ${numberOfFrames} frames @ ${sampleRate}Hz`);
+      // Upmixed mono to stereo - 16-bit format preserved (logging reduced)
       return stereoAudioData;
       
     } else {
@@ -336,7 +338,7 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
         data: stereoBuffer
       });
       
-      console.log(`Worker: Upmixed mono to stereo - preserved float format: ${originalFormat} - ${numberOfFrames} frames @ ${sampleRate}Hz`);
+      // Upmixed mono to stereo - float format preserved (logging reduced)
       return stereoAudioData;
     }
     
@@ -355,20 +357,63 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
   if (!canvasContext || !offscreenCanvas || !videoEncoder) {
     throw new Error('Downscaling components not initialized');
   }
-  
+
+  let scaledFrame: VideoFrame | null = null;
+  let bitmap: ImageBitmap | null = null;
+
   try {
-    // Draw the high-resolution frame onto the scaled canvas
-    canvasContext.drawImage(originalFrame, 0, 0, scaledWidth, scaledHeight);
+    const startTime = performance.now();
     
+    // Use the non-blocking createImageBitmap API for efficient decoding
+    bitmap = await createImageBitmap(originalFrame);
+    const bitmapTime = performance.now() - startTime;
+
+    // The drawImage call is now much faster as the bitmap is already prepared
+    const drawStart = performance.now();
+    canvasContext.drawImage(bitmap, 0, 0, scaledWidth, scaledHeight);
+    const drawTime = performance.now() - drawStart;
+
     // Create a new, low-resolution VideoFrame from the canvas
-    const scaledFrame = new VideoFrame(offscreenCanvas, {
+    const frameCreateStart = performance.now();
+    scaledFrame = new VideoFrame(offscreenCanvas, {
       timestamp: originalFrame.timestamp,
       duration: originalFrame.duration || undefined
     });
-    
+    const frameCreateTime = performance.now() - frameCreateStart;
+
+    // The intelligent encode/drop logic with more aggressive threshold for scaling
+    if (videoEncoder.encodeQueueSize > 20) { // Using a slightly more aggressive threshold for scaling
+      console.warn(`Worker: Skipping frame due to queue backpressure (${videoEncoder.encodeQueueSize})`);
+      needsKeyFrame = true;
+      // Clean up frames before returning early
+      if (scaledFrame) {
+        scaledFrame.close();
+      }
+      originalFrame.close();
+      return; // Return early, skipping the encode
+    }
+
     // Encode the scaled frame
-    videoEncoder.encode(scaledFrame);
+    const encodeStart = performance.now();
+    if (needsKeyFrame) {
+      videoEncoder.encode(scaledFrame, { keyFrame: true });
+      needsKeyFrame = false; // Reset the flag.
+      console.log('Worker: Forced a keyframe to recover from dropped frames (downscaling path).');
+    } else {
+      videoEncoder.encode(scaledFrame);
+    }
+    const encodeTime = performance.now() - encodeStart;
     
+    // Clean up the scaled frame after encoding
+    scaledFrame.close();
+    originalFrame.close();
+
+    // Log performance if processing is slow
+    const totalTime = bitmapTime + drawTime + frameCreateTime + encodeTime;
+    if (totalTime > 16) { // More than 1 frame at 60fps
+      console.warn(`Worker: Slow downscaling detected - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
+    }
+
     // Drift detection: increment video frame counter
     if (ENABLE_DRIFT_DETECTION) {
       videoFramesProcessed++;
@@ -376,13 +421,25 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
         sendSyncUpdate();
       }
     }
-    
-    // Clean up the scaled frame
-    scaledFrame.close();
-    
+
   } catch (error) {
     console.error('Worker: Error in processFrameWithDownscaling:', error);
     throw error;
+  } catch (error) {
+    // Clean up resources on error
+    if (bitmap) {
+      bitmap.close(); // Close the bitmap to release its memory
+    }
+    if (scaledFrame) {
+      scaledFrame.close();
+    }
+    originalFrame.close();
+    throw error;
+  } finally {
+    // Always clean up the bitmap, but frames are cleaned up in the main path
+    if (bitmap) {
+      bitmap.close(); // Close the bitmap to release its memory
+    }
   }
 }
 
@@ -418,23 +475,39 @@ async function checkVideoSupportWithTimeout(
 ): Promise<VideoEncoderSupport> {
   console.log(`Worker: 🔍 Starting codec support check with ${timeout}ms timeout for:`, config.codec);
   return new Promise((resolve, reject) => {
-    // Create timeout promise that rejects after specified time
-    const timeoutPromise = new Promise<never>((_, timeoutReject) => {
-      setTimeout(() => {
+    let timeoutId: number | null = null;
+    let isResolved = false;
+    
+    // Create timeout that rejects after specified time
+    timeoutId = self.setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
         console.log(`Worker: ⏱️ TIMEOUT TRIGGERED for codec ${config.codec} after ${timeout}ms`);
-        timeoutReject(new Error(`Codec support check timeout after ${timeout}ms`));
-      }, timeout);
-    });
+        reject(new Error(`Codec support check timeout after ${timeout}ms`));
+      }
+    }, timeout);
 
-    // Race the actual support check against the timeout
-    Promise.race([VideoEncoder.isConfigSupported(config), timeoutPromise])
+    // Start the actual codec support check
+    VideoEncoder.isConfigSupported(config)
       .then((result) => {
-        console.log(`Worker: ✅ Codec support check completed for ${config.codec}:`, result);
-        resolve(result);
+        if (!isResolved) {
+          isResolved = true;
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+          }
+          console.log(`Worker: ✅ Codec support check completed for ${config.codec}:`, result);
+          resolve(result);
+        }
       })
       .catch((error) => {
-        console.log(`Worker: ❌ Codec support check failed for ${config.codec}:`, error.message);
-        reject(error);
+        if (!isResolved) {
+          isResolved = true;
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+          }
+          console.log(`Worker: ❌ Codec support check failed for ${config.codec}:`, error.message);
+          reject(error);
+        }
       });
   });
 }
@@ -451,17 +524,37 @@ async function checkAudioSupportWithTimeout(
   timeout = 2000
 ): Promise<AudioEncoderSupport> {
   return new Promise((resolve, reject) => {
-    // Create timeout promise that rejects after specified time
-    const timeoutPromise = new Promise<never>((_, timeoutReject) => {
-      setTimeout(() => {
-        timeoutReject(new Error(`Codec support check timeout after ${timeout}ms`));
-      }, timeout);
-    });
+    let timeoutId: number | null = null;
+    let isResolved = false;
+    
+    // Create timeout that rejects after specified time
+    timeoutId = self.setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
+        reject(new Error(`Codec support check timeout after ${timeout}ms`));
+      }
+    }, timeout);
 
-    // Race the actual support check against the timeout
-    Promise.race([AudioEncoder.isConfigSupported(config), timeoutPromise])
-      .then(resolve)
-      .catch(reject);
+    // Start the actual codec support check
+    AudioEncoder.isConfigSupported(config)
+      .then((result) => {
+        if (!isResolved) {
+          isResolved = true;
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+          }
+          resolve(result);
+        }
+      })
+      .catch((error) => {
+        if (!isResolved) {
+          isResolved = true;
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+          }
+          reject(error);
+        }
+      });
   });
 }
 
@@ -740,6 +833,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     if (ENABLE_DRIFT_DETECTION) {
       videoFramesProcessed = 0;
       audioFramesProcessed = 0;
+      videoFramesDropped = 0;
     }
 
     // Step 1: Determine target resolution based on user selection
@@ -920,28 +1014,13 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
         for (const strategy of strategiesToTry) {
           console.log(`Worker: Attempting ${strategy.name.toUpperCase()} codec configuration...`);
           
-          // Special logging for AV1 to debug Mac support
-          if (strategy.name === 'av1') {
-            console.log('Worker: 🧪 AV1 Debug - Testing AV1 encoding support on this platform...');
-            console.log('Worker: 🧪 AV1 Debug - User Agent:', navigator.userAgent);
-            console.log('Worker: 🧪 AV1 Debug - Platform:', navigator.platform);
-          }
+          // AV1 debug logging reduced for cleaner output
           
           for (const codec of strategy.codecs) {
             try {
               const testConfig = { ...baseEncoderConfig, codec };
-              console.log(`Worker: Testing ${strategy.name.toUpperCase()} codec ${codec}...`);
-              
+              // Testing codec support (detailed logging reduced)
               const configSupport = await checkVideoSupportWithTimeout(testConfig, 2000);
-              console.log(`Worker: ${strategy.name.toUpperCase()} codec ${codec} support:`, {
-                supported: configSupport.supported,
-                config: configSupport.config ? {
-                  codec: configSupport.config.codec,
-                  hardwareAcceleration: configSupport.config.hardwareAcceleration,
-                  width: configSupport.config.width,
-                  height: configSupport.config.height
-                } : null
-              });
               
               if (configSupport.supported) {
                 encoderConfig = testConfig;
@@ -950,15 +1029,13 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
                 // Log hardware acceleration status
                 if (configSupport.config) {
                   const accelStatus = configSupport.config.hardwareAcceleration || 'unknown';
-                  console.log(`Worker: ✅ ${strategy.name.toUpperCase()} configuration successful with codec: ${codec} (Hardware accel: ${accelStatus})`);
-                } else {
-                  console.log(`Worker: ✅ ${strategy.name.toUpperCase()} configuration successful with codec: ${codec}`);
+                  // Codec configuration successful (detailed logging reduced)
                 }
                 
                 // Success - break out of both loops
                 break;
               } else {
-                console.log(`Worker: ❌ ${strategy.name.toUpperCase()} codec ${codec} not supported`);
+                // Codec not supported (logging reduced)
               }
             } catch (error) {
               // Handle both timeout errors and other codec check errors
@@ -1248,35 +1325,50 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
         break;
       }
       
-      // Backpressure management - wait for encoder to catch up
-      if (videoEncoder && videoEncoder.encodeQueueSize > 30) {
-        console.warn('Worker: Video encoder queue getting full, waiting for it to drain. Queue size:', videoEncoder.encodeQueueSize);
-        // Wait until the queue size drops to a reasonable level
-        while (videoEncoder && videoEncoder.encodeQueueSize > 15) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        console.log('Worker: Video encoder queue drained to:', videoEncoder?.encodeQueueSize);
+      // Backpressure management: Balanced threshold for downscaling scenarios
+      const queueThreshold = needsScaling ? 20 : 30; // Moderate threshold when downscaling
+      if (videoEncoder && videoEncoder.encodeQueueSize > queueThreshold) {
+        // The queue is too long, so we need to drop this frame.
+        videoFramesDropped++;
+        console.warn(`Worker: Video encoder queue is full (${videoEncoder.encodeQueueSize}). Dropping frame to maintain sync. (Threshold: ${queueThreshold}, Dropped: ${videoFramesDropped})`);
+        frame.close(); // Make sure to release the memory.
+        needsKeyFrame = true; // Flag that we need a keyframe to recover.
+        continue; // Skip to the next frame.
       }
-      
+
       // Encode the frame (with conditional downscaling)
       if (videoEncoder && frame) {
-        if (needsScaling) {
-          // Downscaling path: process frame through OffscreenCanvas
-          await processFrameWithDownscaling(frame);
-        } else {
-          // Direct path: encode frame as-is
-          videoEncoder.encode(frame);
-          
-          // Drift detection: increment video frame counter
-          if (ENABLE_DRIFT_DETECTION) {
-            videoFramesProcessed++;
-            if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
-              sendSyncUpdate();
+        try {
+          if (needsScaling) {
+            // Downscaling path: process frame through OffscreenCanvas
+            await processFrameWithDownscaling(frame);
+          } else {
+            // Direct path: encode frame as-is
+            // If we just dropped frames, the next one we send MUST be a keyframe.
+            if (needsKeyFrame) {
+              videoEncoder.encode(frame, { keyFrame: true });
+              needsKeyFrame = false; // Reset the flag.
+              console.log('Worker: Forced a keyframe to recover from dropped frames.');
+            } else {
+              videoEncoder.encode(frame);
+            }
+            
+            // Drift detection: increment video frame counter
+            if (ENABLE_DRIFT_DETECTION) {
+              videoFramesProcessed++;
+              if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
+                sendSyncUpdate();
+              }
             }
           }
+        } catch (encodingError) {
+          console.error('Worker: Error during video frame processing:', encodingError);
+          // Re-throw to be caught by outer try-catch
+          throw encodingError;
+        } finally {
+          // Always release the original frame memory, even if encoding fails
+          frame.close();
         }
-        // Always release the original frame memory
-        frame.close();
       }
     }
     
@@ -1327,18 +1419,11 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
         let needsCleanup = false;
         
         try {
-          // Debug audio frame properties
-          console.log('Worker: Processing audio frame:', {
-            sampleRate: audioFrame.sampleRate,
-            numberOfChannels: audioFrame.numberOfChannels,
-            numberOfFrames: audioFrame.numberOfFrames,
-            format: audioFrame.format,
-            needsUpmixing: needsUpmixing
-          });
+          // Per-frame logging removed to reduce console noise
           
           // Handle channel mismatch with upmixing
           if (needsUpmixing && audioFrame.numberOfChannels === 1 && finalEncoderChannels === 2) {
-            console.log('Worker: 🎵 Upmixing mono frame to stereo');
+            // Upmixing mono frame to stereo (logging reduced)
             frameToEncode = upmixMonoToStereo(audioFrame);
             needsCleanup = true; // We created a new frame that needs cleanup
           } else if (currentAudioConfig && audioFrame.numberOfChannels !== currentAudioConfig.numberOfChannels) {
@@ -1429,25 +1514,22 @@ async function handleStopMessage(): Promise<void> {
       audioFramesProcessed = 0;
     }
 
-    // Step 1: Cancel Stream Readers - Stop processing new frames
+    // Step 1: Wait for Stream Readers to finish naturally - they should terminate
+    // when the main thread processing loops see the stop signal
+    console.log('Worker: Waiting for streams to close naturally...');
+    
+    // Give a moment for the main thread processing loops to terminate gracefully
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Clean up stream reader references (they should already be closed)
     if (streamReader) {
-      try {
-        await streamReader.cancel();
-        console.log('Worker: Video stream reader cancelled');
-      } catch (error) {
-        console.warn('Worker: Error cancelling video stream reader:', error);
-      }
       streamReader = null;
+      console.log('Worker: Video stream reader reference cleared');
     }
 
     if (audioStreamReader) {
-      try {
-        await audioStreamReader.cancel();
-        console.log('Worker: Audio stream reader cancelled');
-      } catch (error) {
-        console.warn('Worker: Error cancelling audio stream reader:', error);
-      }
       audioStreamReader = null;
+      console.log('Worker: Audio stream reader reference cleared');
     }
 
     // Step 2: Flush Encoders - Process any remaining buffered frames
