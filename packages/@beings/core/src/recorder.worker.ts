@@ -136,6 +136,55 @@ function determineTargetResolution(
 }
 
 /**
+ * Convert 32-bit float audio to 16-bit integer format for encoder compatibility
+ * 
+ * @param audioData - The f32 AudioData frame to be converted
+ * @returns New s16 AudioData frame with converted samples
+ */
+function convertF32toS16(audioData: AudioData): AudioData {
+  try {
+    const sampleRate = audioData.sampleRate;
+    const numberOfChannels = audioData.numberOfChannels;
+    const numberOfFrames = audioData.numberOfFrames;
+    const timestamp = audioData.timestamp;
+    const duration = audioData.duration;
+    
+    console.log(`Worker: Converting f32 to s16 - ${numberOfChannels} channels, ${numberOfFrames} frames @ ${sampleRate}Hz`);
+    
+    // Calculate buffer size (interleaved format)
+    const bufferSize = numberOfFrames * numberOfChannels;
+    const s16Buffer = new Int16Array(bufferSize);
+    
+    // Copy f32 data to temporary buffer
+    const f32Buffer = new Float32Array(bufferSize);
+    audioData.copyTo(f32Buffer, { planeIndex: 0 });
+    
+    // Convert each f32 sample to s16
+    for (let i = 0; i < bufferSize; i++) {
+      const sample = Math.max(-1, Math.min(1, f32Buffer[i])); // Clamp to valid range
+      s16Buffer[i] = Math.round(sample * 32767); // Convert to 16-bit range
+    }
+    
+    // Create new s16 AudioData frame
+    const s16AudioData = new AudioData({
+      format: 's16',
+      sampleRate: sampleRate,
+      numberOfChannels: numberOfChannels,
+      numberOfFrames: numberOfFrames,
+      timestamp: timestamp,
+      data: s16Buffer
+    });
+    
+    console.log(`Worker: ✅ Converted f32 to s16 - ${numberOfChannels} channels, ${numberOfFrames} frames`);
+    return s16AudioData;
+    
+  } catch (error) {
+    console.error('Worker: Error in convertF32toS16:', error);
+    throw error;
+  }
+}
+
+/**
  * Upmix mono audio to stereo by duplicating the mono channel to both left and right channels
  * 
  * @param monoAudioData - The mono AudioData frame to be upmixed
@@ -1220,8 +1269,25 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
             return;
           }
           
-          // Encode the frame (original or upmixed)
-          audioEncoder.encode(frameToEncode);
+          // Check for format mismatch and convert if needed
+          let finalFrameToEncode = frameToEncode;
+          let formatConversionNeeded = false;
+          
+          if (frameToEncode.format && frameToEncode.format.startsWith('f32') && 
+              currentAudioConfig && currentAudioConfig.codec && currentAudioConfig.codec.includes('aac')) {
+            // Convert f32 to s16 for AAC encoder compatibility
+            console.log('Worker: 🔄 Converting f32 audio to s16 for AAC encoder');
+            finalFrameToEncode = convertF32toS16(frameToEncode);
+            formatConversionNeeded = true;
+          }
+          
+          // Encode the frame (original, upmixed, or format-converted)
+          audioEncoder.encode(finalFrameToEncode);
+          
+          // Clean up frames
+          if (formatConversionNeeded && finalFrameToEncode !== frameToEncode) {
+            finalFrameToEncode.close(); // Close the converted frame
+          }
           
         } catch (error) {
           console.error('Worker: Error processing audio frame:', {
