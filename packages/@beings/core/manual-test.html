@@ -567,6 +567,29 @@
             font-weight: 600;
         }
 
+        /* Drift indicator styling */
+        .drift-indicator {
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .drift-low { 
+            background-color: var(--success-bg); 
+            color: var(--success-color); 
+        }
+
+        .drift-moderate { 
+            background-color: #fff3e0; 
+            color: #f57c00; 
+        }
+
+        .drift-high { 
+            background-color: var(--error-bg); 
+            color: var(--error-color); 
+        }
+
         /* Standardized Color System */
         .stat-excellent, .metric-value.excellent {
             color: var(--success-color) !important;
@@ -1229,6 +1252,20 @@
                     </div>
                     
                             <div class="stats-subsection">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                    <h5 style="margin: 0;">A/V Sync Diagnostics</h5>
+                                    <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; cursor: pointer;">
+                                        <input type="checkbox" id="driftDetectionToggle" checked style="margin: 0;">
+                                        <span>Enable</span>
+                                    </label>
+                                </div>
+                                <div class="stat-item">Video Frames: <span id="videoFrameCount">--</span></div>
+                                <div class="stat-item">Audio Frames: <span id="audioFrameCount">--</span></div>
+                                <div class="stat-item">Drift (Audio Ahead by): <span id="syncDrift" class="drift-indicator">--</span></div>
+                                <div class="stat-item">Drift Status: <span id="driftStatus">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
                                 <h5>Recording Analysis</h5>
                                 <div class="stat-item">File Size: <span id="analysisFileSize">--</span></div>
                                 <div class="stat-item">Duration: <span id="analysisDuration">--</span></div>
@@ -1381,6 +1418,9 @@
         const hudDroppedFrames = document.getElementById('hudDroppedFrames');
         const hudActiveCodec = document.getElementById('hudActiveCodec');
         const hudHardwareAccel = document.getElementById('hudHardwareAccel');
+
+        // Drift detection toggle reference
+        const driftDetectionToggle = document.getElementById('driftDetectionToggle');
 
         // Workflow State Management Functions
         function updateWorkflowState(newState) {
@@ -2637,6 +2677,52 @@
             statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
         }
 
+        // Update A/V sync diagnostics display
+        function updateSyncDiagnostics(syncData) {
+            // Check if drift detection is enabled in UI
+            const driftToggle = document.getElementById('driftDetectionToggle');
+            if (!driftToggle || !driftToggle.checked) {
+                return; // Skip update if disabled
+            }
+            
+            document.getElementById('videoFrameCount').textContent = syncData.videoFramesProcessed;
+            document.getElementById('audioFrameCount').textContent = syncData.audioFramesProcessed;
+            
+            const driftElement = document.getElementById('syncDrift');
+            const statusElement = document.getElementById('driftStatus');
+            
+            // Apply drift value with proper sign display
+            if (syncData.drift === 0) {
+                driftElement.textContent = '0';
+            } else if (syncData.drift > 0) {
+                driftElement.textContent = `+${syncData.drift}`;
+            } else {
+                driftElement.textContent = syncData.drift;
+            }
+            
+            // Dynamic color coding based on drift magnitude
+            driftElement.className = 'drift-indicator';
+            if (Math.abs(syncData.drift) <= 5) {
+                driftElement.classList.add('drift-low');
+                statusElement.textContent = 'Good Sync';
+            } else if (Math.abs(syncData.drift) <= 15) {
+                driftElement.classList.add('drift-moderate');
+                statusElement.textContent = 'Minor Drift';
+            } else {
+                driftElement.classList.add('drift-high');
+                statusElement.textContent = 'Significant Drift';
+            }
+        }
+
+        // Clear A/V sync diagnostics display
+        function clearSyncDiagnostics() {
+            document.getElementById('videoFrameCount').textContent = '--';
+            document.getElementById('audioFrameCount').textContent = '--';
+            document.getElementById('syncDrift').textContent = '--';
+            document.getElementById('syncDrift').className = 'drift-indicator'; // Reset to base class
+            document.getElementById('driftStatus').textContent = '--';
+        }
+
         // Analyze the recorded file and display technical details
         async function analyzeRecordedFile(blob) {
             try {
@@ -3155,6 +3241,14 @@
         zoomInButton.addEventListener('click', zoomIn);
         zoomOutButton.addEventListener('click', zoomOut);
 
+        // Drift detection toggle event listener
+        driftDetectionToggle.addEventListener('change', () => {
+            if (!driftDetectionToggle.checked) {
+                // Clear the display when disabled
+                clearSyncDiagnostics();
+            }
+        });
+
         // Open tab button click handler
         openTabButton.addEventListener('click', () => {
             window.open('https://youtu.be/AKeUssuu3Is?si=qNn6hayZNF7GIIgi', '_blank');
@@ -3635,6 +3729,11 @@
                 
                 recorder = new SlowTrackRecorder(recorderConfig);
 
+                // Add sync update listener for drift detection
+                recorder.on('sync-update', (syncData) => {
+                    updateSyncDiagnostics(syncData);
+                });
+
                 // Start recording
                 showStatus('Detecting optimal codec...', 'info');
                 await recorder.start(mediaStream);
@@ -3762,6 +3861,9 @@
                 const blob = await recorder.stop();
                 console.log('Recording stopped, blob created:', blob);
                 showStatus('Recording completed successfully!', 'success');
+                
+                // Clear drift detection display when recording stops
+                clearSyncDiagnostics();
                 
                 // Update Recording Audio Status to "Completed"
                 const recordingAudioStatusSpan = document.getElementById('recordingAudioStatus');

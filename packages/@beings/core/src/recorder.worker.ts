@@ -11,7 +11,7 @@
 // Dynamic imports to avoid worker loading issues
 // import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 // import WebMMuxer from 'webm-muxer';
-import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig, FinalEncoderConfig } from './types';
+import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig, FinalEncoderConfig, SyncData } from './types';
 
 // Module-level state variables
 let videoEncoder: VideoEncoder | null = null;
@@ -46,6 +46,12 @@ let canvasContext: OffscreenCanvasRenderingContext2D | null = null;
 
 // Muxer chunk collection state
 let muxedChunks: Uint8Array[] = [];
+
+// Drift detection configuration and state
+const ENABLE_DRIFT_DETECTION = true;
+const SYNC_UPDATE_FRAME_INTERVAL = 30; // Send an update roughly once per second at 30fps
+let videoFramesProcessed = 0;
+let audioFramesProcessed = 0;
 
 /**
  * Calculate scaled dimensions that fit within hardware limits while preserving aspect ratio
@@ -92,6 +98,27 @@ function calculateScaledDimensions(
   if (finalHeight > 1080) finalHeight = 1080;
   
   return { width: finalWidth, height: finalHeight, needsScaling: true };
+}
+
+/**
+ * Send A/V sync diagnostics update to main thread
+ * Calculates drift as audioFrames - videoFrames (positive = audio ahead)
+ */
+function sendSyncUpdate(): void {
+  if (!ENABLE_DRIFT_DETECTION) return;
+  
+  const drift = audioFramesProcessed - videoFramesProcessed;
+  const syncData: SyncData = {
+    videoFramesProcessed,
+    audioFramesProcessed,
+    drift,
+    timestamp: performance.now()
+  };
+  
+  self.postMessage({
+    type: 'sync-update',
+    syncData
+  });
 }
 
 /**
@@ -341,6 +368,14 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     
     // Encode the scaled frame
     videoEncoder.encode(scaledFrame);
+    
+    // Drift detection: increment video frame counter
+    if (ENABLE_DRIFT_DETECTION) {
+      videoFramesProcessed++;
+      if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
+        sendSyncUpdate();
+      }
+    }
     
     // Clean up the scaled frame
     scaledFrame.close();
@@ -699,6 +734,12 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
 
     if (!data.config) {
       throw new Error('No configuration provided');
+    }
+    
+    // Reset drift detection counters for new recording session
+    if (ENABLE_DRIFT_DETECTION) {
+      videoFramesProcessed = 0;
+      audioFramesProcessed = 0;
     }
 
     // Step 1: Determine target resolution based on user selection
@@ -1225,6 +1266,14 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
         } else {
           // Direct path: encode frame as-is
           videoEncoder.encode(frame);
+          
+          // Drift detection: increment video frame counter
+          if (ENABLE_DRIFT_DETECTION) {
+            videoFramesProcessed++;
+            if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
+              sendSyncUpdate();
+            }
+          }
         }
         // Always release the original frame memory
         frame.close();
@@ -1323,6 +1372,11 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
           // Encode the frame (original, upmixed, or format-converted)
           audioEncoder.encode(finalFrameToEncode);
           
+          // Drift detection: increment audio frame counter
+          if (ENABLE_DRIFT_DETECTION) {
+            audioFramesProcessed++;
+          }
+          
           // Clean up frames
           if (formatConversionNeeded && finalFrameToEncode !== frameToEncode) {
             finalFrameToEncode.close(); // Close the converted frame
@@ -1368,6 +1422,12 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
 async function handleStopMessage(): Promise<void> {
   try {
     console.log('Worker: Received stop command, finalizing recording');
+    
+    // Reset drift detection counters when stopping
+    if (ENABLE_DRIFT_DETECTION) {
+      videoFramesProcessed = 0;
+      audioFramesProcessed = 0;
+    }
 
     // Step 1: Cancel Stream Readers - Stop processing new frames
     if (streamReader) {

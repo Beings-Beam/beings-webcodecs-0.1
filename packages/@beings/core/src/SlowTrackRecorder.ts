@@ -1,4 +1,4 @@
-import type { RecorderWorkerResponse, AudioConfig, FinalEncoderConfig, RecordingResult } from './types';
+import type { RecorderWorkerResponse, AudioConfig, FinalEncoderConfig, RecordingResult, SyncData } from './types';
 
 /**
  * Configuration interface for the SlowTrackRecorder
@@ -27,6 +27,7 @@ export interface RecorderEvents {
   'pause': () => void;
   'resume': () => void;
   'error': (error: Error) => void;
+  'sync-update': (syncData: SyncData) => void;
 }
 
 /**
@@ -203,6 +204,12 @@ export class SlowTrackRecorder {
         
         case 'error':
           this.#handleWorkerError(event.data.error || 'Unknown worker error');
+          break;
+        
+        case 'sync-update':
+          if (event.data.syncData) {
+            this.#emit('sync-update', event.data.syncData);
+          }
           break;
         
         default:

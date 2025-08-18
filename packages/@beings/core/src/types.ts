@@ -61,14 +61,26 @@ export interface RecorderWorkerRequest {
 }
 
 /**
+ * Sync diagnostics data for A/V drift detection
+ */
+export interface SyncData {
+  videoFramesProcessed: number;
+  audioFramesProcessed: number;
+  drift: number;  // Calculated as audioFrames - videoFrames (positive = audio ahead)
+  timestamp: number;  // Performance.now() when message was sent
+}
+
+/**
  * Message interface for communication from worker to main thread
  */
 export interface RecorderWorkerResponse {
-  type: 'ready' | 'error' | 'file';
+  type: 'ready' | 'error' | 'file' | 'sync-update';
   error?: string;
   blob?: Blob;
   /** Final encoder configuration data (ground truth of what was actually used) */
   finalConfig?: FinalEncoderConfig;
   /** @deprecated Use finalConfig.video.codec instead */
   finalCodec?: 'av1' | 'hevc' | 'h264' | 'vp9';
+  /** Sync diagnostics data for A/V drift detection */
+  syncData?: SyncData;
 }
