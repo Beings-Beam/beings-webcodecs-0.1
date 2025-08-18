@@ -2416,7 +2416,7 @@
                         codec: audioCodec,
                         sampleRate: actualSampleRate,
                         numberOfChannels: actualChannels,  // Use actual detected channels
-                        bitrate: actualChannels === 1 ? 64000 : 128000  // Lower bitrate for mono
+                        bitrate: actualChannels === 1 ? 128000 : 256000  // Higher bitrate for better quality
                     };
                     console.log('Audio configuration:', recorderConfig.audio);
                     
