@@ -2008,20 +2008,55 @@
                 const audioCodecSpan = document.getElementById('analysisAudioCodec');
                 const audioChannelsSpan = document.getElementById('analysisAudioChannels');
 
+                // Get comprehensive recording result with actual final configuration
+                const recordingResult = recorder.getLastRecordingResult();
+                
                 if (videoCodecSpan) {
-                    const finalCodec = recorder.getFinalCodec();
-                    videoCodecSpan.textContent = finalCodec ? finalCodec.toUpperCase() : 'Unknown';
+                    const finalCodec = recordingResult?.finalConfig?.video.codec;
+                    if (finalCodec) {
+                        // Extract simple name from full codec string for display
+                        let displayCodec = 'Unknown';
+                        if (finalCodec.startsWith('hvc1') || finalCodec.startsWith('hev1')) displayCodec = 'HEVC';
+                        else if (finalCodec.startsWith('avc1') || finalCodec.startsWith('avc3')) displayCodec = 'H.264';
+                        else if (finalCodec.startsWith('av01')) displayCodec = 'AV1';
+                        else if (finalCodec.startsWith('vp09')) displayCodec = 'VP9';
+                        else displayCodec = finalCodec.toUpperCase();
+                        
+                        videoCodecSpan.textContent = `${displayCodec} (${finalCodec})`;
+                    } else {
+                        // Fallback to old method if final config not available
+                        const legacyCodec = recorder.getFinalCodec();
+                        videoCodecSpan.textContent = legacyCodec ? legacyCodec.toUpperCase() : 'Unknown';
+                    }
                 }
 
                 if (audioCodecSpan) {
-                    audioCodecSpan.textContent = 'AAC'; // We know this from our configuration
+                    const finalAudioCodec = recordingResult?.finalConfig?.audio?.codec;
+                    if (finalAudioCodec) {
+                        // Display actual codec used
+                        let displayAudioCodec = 'Unknown';
+                        if (finalAudioCodec === 'mp4a.40.2') displayAudioCodec = 'AAC-LC';
+                        else if (finalAudioCodec === 'opus') displayAudioCodec = 'Opus';
+                        else if (finalAudioCodec === 'mp3') displayAudioCodec = 'MP3';
+                        else if (finalAudioCodec === 'flac') displayAudioCodec = 'FLAC';
+                        else displayAudioCodec = finalAudioCodec;
+                        
+                        audioCodecSpan.textContent = `${displayAudioCodec} (${finalAudioCodec})`;
+                    } else {
+                        audioCodecSpan.textContent = 'AAC (fallback)'; // Fallback assumption
+                    }
                 }
 
                 if (audioChannelsSpan) {
-                    // Get the channel count from our current audio config
-                    const recordingChannelCountSpan = document.getElementById('recordingChannelCount');
-                    const channelCount = recordingChannelCountSpan ? recordingChannelCountSpan.textContent : 'Unknown';
-                    audioChannelsSpan.textContent = channelCount === '1' ? 'Mono (1)' : channelCount === '2' ? 'Stereo (2)' : channelCount;
+                    const finalChannels = recordingResult?.finalConfig?.audio?.numberOfChannels;
+                    if (finalChannels !== undefined) {
+                        audioChannelsSpan.textContent = finalChannels === 1 ? 'Mono (1)' : finalChannels === 2 ? 'Stereo (2)' : `${finalChannels} channels`;
+                    } else {
+                        // Fallback to UI display
+                        const recordingChannelCountSpan = document.getElementById('recordingChannelCount');
+                        const channelCount = recordingChannelCountSpan ? recordingChannelCountSpan.textContent : 'Unknown';
+                        audioChannelsSpan.textContent = channelCount === '1' ? 'Mono (1)' : channelCount === '2' ? 'Stereo (2)' : channelCount;
+                    }
                 }
 
                 // Clean up

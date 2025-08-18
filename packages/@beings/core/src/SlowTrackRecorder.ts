@@ -1,4 +1,4 @@
-import type { RecorderWorkerResponse, AudioConfig } from './types';
+import type { RecorderWorkerResponse, AudioConfig, FinalEncoderConfig, RecordingResult } from './types';
 
 /**
  * Configuration interface for the SlowTrackRecorder
@@ -64,6 +64,7 @@ export class SlowTrackRecorder {
   #finalCodec: 'av1' | 'hevc' | 'h264' | 'vp9' | null = null;
   #startPromiseResolve: (() => void) | null = null;
   #startPromiseReject: ((error: Error) => void) | null = null;
+  #lastResult: RecordingResult | null = null;
 
   /**
    * Check if the SlowTrackRecorder is supported in the current environment
@@ -233,6 +234,20 @@ export class SlowTrackRecorder {
 
       // Use the blob directly from the worker (no conversion needed)
       const videoBlob = data.blob;
+      
+      // Store comprehensive recording result for post-recording analysis
+      this.#lastResult = {
+        blob: videoBlob,
+        requestedConfig: { ...this.#config }, // Deep copy of the original config
+        finalConfig: data.finalConfig // May be undefined if worker crashed
+      };
+      
+      console.log('SlowTrackRecorder: Recording result stored:', {
+        blobSize: videoBlob.size,
+        hasFinalConfig: !!data.finalConfig,
+        requestedCodec: this.#config.codecSelection,
+        finalCodec: data.finalConfig?.video.codec
+      });
 
       // Resolve the stop promise with the video blob
       if (this.#stopPromiseResolve) {
@@ -288,6 +303,9 @@ export class SlowTrackRecorder {
       if (this.#isRecording) {
         throw new Error('Recording already in progress');
       }
+      
+      // Clear previous recording result for new recording
+      this.#lastResult = null;
 
       // Extract Tracks: Get both video and audio tracks from the stream
       const videoTracks = stream.getVideoTracks();
@@ -464,8 +482,19 @@ export class SlowTrackRecorder {
   }
 
   /**
+   * Get comprehensive result data for the most recently completed recording
+   * 
+   * @returns Recording result containing blob, requested config, and final config
+   *          Returns null if no recording has been completed yet
+   */
+  getLastRecordingResult(): RecordingResult | null {
+    return this.#lastResult;
+  }
+
+  /**
    * Get the final codec that was selected by the automatic fallback system
    * 
+   * @deprecated Use getLastRecordingResult().finalConfig.video.codec instead
    * @returns The codec that is actually being used ('av1', 'hevc', 'h264', 'vp9', or null if not determined)
    */
   getFinalCodec(): 'av1' | 'hevc' | 'h264' | 'vp9' | null {

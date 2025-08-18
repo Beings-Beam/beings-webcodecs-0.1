@@ -11,7 +11,7 @@
 // Dynamic imports to avoid worker loading issues
 // import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 // import WebMMuxer from 'webm-muxer';
-import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig } from './types';
+import type { RecorderWorkerRequest, RecorderWorkerResponse, AudioConfig, FinalEncoderConfig } from './types';
 
 // Module-level state variables
 let videoEncoder: VideoEncoder | null = null;
@@ -29,6 +29,13 @@ let needsUpmixing = false;
 let originalStreamChannels = 0;
 let finalEncoderChannels = 0;
 let currentAudioConfig: AudioEncoderConfig | null = null;
+
+// Final configuration tracking (ground truth for post-recording analysis)
+let finalVideoConfig: VideoEncoderConfig | null = null;
+let finalAudioEncoderConfig: AudioEncoderConfig | null = null;
+let finalContainerType: 'mp4' | 'webm' | null = null;
+let recordingStartTime: number | null = null;
+let hardwareAccelerationUsed: boolean | null = null;
 
 // Downscaling state variables
 let needsScaling = false;
@@ -133,6 +140,19 @@ function determineTargetResolution(
       console.warn('Worker: Unknown resolution target, falling back to 720p:', resolutionTarget);
       return { width: 1280, height: 720, needsScaling: true };
   }
+}
+
+/**
+ * Extract codec name from full codec string for backward compatibility
+ * @param codecString - Full codec string (e.g., 'hvc1.1.6.L93.B0')
+ * @returns Simple codec name (e.g., 'hevc')
+ */
+function extractCodecName(codecString: string): 'av1' | 'hevc' | 'h264' | 'vp9' | undefined {
+  if (codecString.startsWith('av01')) return 'av1';
+  if (codecString.startsWith('hvc1') || codecString.startsWith('hev1')) return 'hevc';
+  if (codecString.startsWith('avc1') || codecString.startsWith('avc3')) return 'h264';
+  if (codecString.startsWith('vp09')) return 'vp9';
+  return undefined;
 }
 
 /**
@@ -605,8 +625,11 @@ async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'o
     // Configure the audio encoder
     audioEncoder.configure(currentAudioConfig);
     
+    // Capture final audio configuration for post-recording analysis
+    finalAudioEncoderConfig = currentAudioConfig ? { ...currentAudioConfig } : null;
+    
     // Detect channel mismatch and set up upmixing if needed
-    originalStreamChannels = finalAudioConfig.numberOfChannels;
+    originalStreamChannels = finalAudioEncoderConfig?.numberOfChannels || 0;
     finalEncoderChannels = currentAudioConfig.numberOfChannels;
     
     if (originalStreamChannels === 1 && finalEncoderChannels === 2) {
@@ -1115,6 +1138,13 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
 
     // Step 5: Configure Video Encoder
     videoEncoder.configure(encoderConfig);
+    
+    // Capture final video configuration for post-recording analysis
+    finalVideoConfig = { ...encoderConfig };
+    finalContainerType = containerType;
+    
+    // Capture hardware acceleration status from the encoder configuration
+    hardwareAccelerationUsed = encoderConfig.hardwareAcceleration === 'prefer-hardware';
 
     // Send confirmation back to main thread with final codec information
     console.log('Worker: About to send ready message with finalCodec:', finalCodec);
@@ -1161,6 +1191,11 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
     streamReader = stream.getReader();
     
     console.log('Worker: Starting video frame processing loop');
+    
+    // Capture recording start time for duration calculation
+    if (recordingStartTime === null) {
+      recordingStartTime = performance.now();
+    }
     
     // Continuous processing loop
     while (true) {
@@ -1416,9 +1451,38 @@ async function handleStopMessage(): Promise<void> {
 
     console.log('Worker: Created final blob, size:', finalBlob.size, 'bytes', 'type:', finalBlob.type);
 
-    // Step 4: Send File - Transfer the completed video blob to main thread
-    self.postMessage({ type: 'file', blob: finalBlob });
-    console.log('Worker: Video blob sent to main thread');
+    // Step 4: Assemble Final Configuration Data
+    const recordingEndTime = performance.now();
+    const recordingDuration = recordingStartTime ? (recordingEndTime - recordingStartTime) : 0;
+    
+    let finalConfig: FinalEncoderConfig | undefined = undefined;
+    
+    if (finalVideoConfig && finalContainerType) {
+      finalConfig = {
+        video: {
+          ...finalVideoConfig,
+          hardwareAccelerationUsed: hardwareAccelerationUsed ?? false
+        },
+        audio: finalAudioEncoderConfig ? { ...finalAudioEncoderConfig } : undefined,
+        container: finalContainerType,
+        duration: recordingDuration
+      };
+      
+      console.log('Worker: Final configuration assembled:', finalConfig);
+    } else {
+      console.warn('Worker: Could not assemble final configuration - missing video config or container type');
+    }
+
+    // Step 5: Send File - Transfer the completed video blob and final config to main thread
+    const response: RecorderWorkerResponse = {
+      type: 'file', 
+      blob: finalBlob,
+      finalConfig: finalConfig,
+      finalCodec: finalVideoConfig?.codec ? extractCodecName(finalVideoConfig.codec) : undefined
+    };
+    
+    self.postMessage(response);
+    console.log('Worker: Video blob and final config sent to main thread');
 
     // Step 5: Cleanup resources
     // Reset chunk collection
@@ -1440,6 +1504,13 @@ async function handleStopMessage(): Promise<void> {
     originalStreamChannels = 0;
     finalEncoderChannels = 0;
     currentAudioConfig = null;
+    
+    // Reset final configuration tracking
+    finalVideoConfig = null;
+    finalAudioEncoderConfig = null;
+    finalContainerType = null;
+    recordingStartTime = null;
+    hardwareAccelerationUsed = null;
 
     // Step 6: Close Worker - Terminate this worker thread
     self.close();

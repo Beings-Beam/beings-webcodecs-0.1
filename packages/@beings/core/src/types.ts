@@ -5,6 +5,35 @@
 import type { SlowTrackRecorderConfig } from './SlowTrackRecorder';
 
 /**
+ * Final encoder configuration data representing what was actually used
+ * This is the "ground truth" of the recording, after all fallbacks and negotiations
+ */
+export interface FinalEncoderConfig {
+  video: VideoEncoderConfig & {
+    /** Whether hardware acceleration was actually used (from browser support check) */
+    hardwareAccelerationUsed?: boolean;
+  };
+  audio?: AudioEncoderConfig;
+  /** Final container format used for muxing */
+  container: 'mp4' | 'webm';
+  /** Actual recording duration in milliseconds */
+  duration: number;
+}
+
+/**
+ * Comprehensive result object for a completed recording
+ * Provides both the recorded blob and configuration comparison data
+ */
+export interface RecordingResult {
+  /** The recorded video blob */
+  blob: Blob;
+  /** The configuration that was originally requested */
+  requestedConfig: SlowTrackRecorderConfig;
+  /** The final configuration actually used (undefined if worker crashed) */
+  finalConfig?: FinalEncoderConfig;
+}
+
+/**
  * Audio configuration interface for the SlowTrackRecorder
  * Defines audio recording parameters for high-fidelity archival recording
  */
@@ -38,5 +67,8 @@ export interface RecorderWorkerResponse {
   type: 'ready' | 'error' | 'file';
   error?: string;
   blob?: Blob;
+  /** Final encoder configuration data (ground truth of what was actually used) */
+  finalConfig?: FinalEncoderConfig;
+  /** @deprecated Use finalConfig.video.codec instead */
   finalCodec?: 'av1' | 'hevc' | 'h264' | 'vp9';
 }
