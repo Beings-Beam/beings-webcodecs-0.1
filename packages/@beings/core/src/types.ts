@@ -71,10 +71,19 @@ export interface SyncData {
 }
 
 /**
+ * Backpressure status for event-driven flow control
+ */
+export interface BackpressureStatus {
+  status: 'high' | 'low';
+  videoQueueSize?: number;
+  audioQueueSize?: number;
+}
+
+/**
  * Message interface for communication from worker to main thread
  */
 export interface RecorderWorkerResponse {
-  type: 'ready' | 'error' | 'file' | 'sync-update';
+  type: 'ready' | 'error' | 'file' | 'sync-update' | 'pressure';
   error?: string;
   blob?: Blob;
   /** Final encoder configuration data (ground truth of what was actually used) */
@@ -83,4 +92,12 @@ export interface RecorderWorkerResponse {
   finalCodec?: 'av1' | 'hevc' | 'h264' | 'vp9';
   /** Sync diagnostics data for A/V drift detection */
   syncData?: SyncData;
+  /** Backpressure status for flow control */
+  status?: 'high' | 'low';
+  videoQueueSize?: number;
+  audioQueueSize?: number;
+  /** Hysteresis tracking for backpressure management */
+  consecutiveCount?: number;
+  backoffMultiplier?: number;
+  cooldownStartTime?: number;
 }

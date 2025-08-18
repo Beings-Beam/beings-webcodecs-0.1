@@ -97,6 +97,19 @@ export class SlowTrackRecorder {
   
   /** Track original audio frames from MediaStreamTrackProcessor */
   #pendingOriginalAudioFrames = new Set<AudioData>();
+  
+  /** Event-driven backpressure control */
+  #isPumpPaused = false;
+  #pressureHighTimestamp: number | null = null;
+  #performanceCheckInterval: number | null = null;
+  
+  /** Refined user feedback system */
+  #firstLevelWarningShown = false;
+  #secondLevelWarningShown = false;
+  
+  /** Enhanced frame lifecycle tracking for diagnostics */
+  #frameLifecycleMap = new Map<VideoFrame, { type: 'original' | 'normalized', operation: string, created: number }>();
+  #maxFrameLifetime = 5000; // 5 seconds - warn about frames held longer than this
 
 
 
@@ -283,6 +296,10 @@ export class SlowTrackRecorder {
           }
           break;
         
+        case 'pressure':
+          this.#handleBackpressureMessage(event.data);
+          break;
+        
         default:
           console.warn('SlowTrackRecorder: Unknown message type from worker:', event.data);
       }
@@ -343,6 +360,135 @@ export class SlowTrackRecorder {
   }
 
   /**
+   * Handle backpressure messages from worker for event-driven flow control
+   * 
+   * @param data - Backpressure message data from worker
+   */
+  #handleBackpressureMessage(data: RecorderWorkerResponse): void {
+    if (data.status === 'high') {
+      const hysteresisInfo = data.consecutiveCount ? ` (attempt ${data.consecutiveCount}, backoff ${data.backoffMultiplier}x)` : '';
+      console.warn(`SlowTrackRecorder: Worker backpressure HIGH${hysteresisInfo}, pausing SYNCHRONIZED A/V pumps (video queue: ${data.videoQueueSize}, audio queue: ${data.audioQueueSize})`);
+      this.#isPumpPaused = true;
+      if (this.#pressureHighTimestamp === null) {
+        this.#pressureHighTimestamp = performance.now();
+        // Start monitoring for prolonged backpressure
+        this.#startPerformanceMonitoring();
+      }
+    } else if (data.status === 'low') {
+      console.log(`SlowTrackRecorder: Worker backpressure LOW, resuming SYNCHRONIZED A/V pumps (video queue: ${data.videoQueueSize}, audio queue: ${data.audioQueueSize}) - hysteresis cooldown active`);
+      this.#isPumpPaused = false;
+      this.#pressureHighTimestamp = null;
+      // Stop performance monitoring when backpressure is resolved
+      this.#stopPerformanceMonitoring();
+    }
+  }
+
+  /**
+   * Start monitoring for prolonged backpressure and provide measured user feedback
+   * Uses a two-stage warning system with professional, non-alarming messaging
+   */
+  #startPerformanceMonitoring(): void {
+    if (this.#performanceCheckInterval !== null) {
+      return; // Already monitoring
+    }
+
+    this.#performanceCheckInterval = window.setInterval(() => {
+      if (!this.#pressureHighTimestamp) return;
+      
+      const duration = performance.now() - this.#pressureHighTimestamp;
+      const durationSeconds = Math.round(duration / 1000);
+      
+      // First-level warning: 12 seconds (measured, non-alarming)
+      if (duration > 12000 && !this.#firstLevelWarningShown) {
+        this.#firstLevelWarningShown = true;
+        const message = 'Performance notice: Recording quality may be reduced due to system load. This will not affect your current recording.';
+        
+        console.info(`SlowTrackRecorder: ${message} (${durationSeconds}s backpressure)`);
+        // Emit as info event, not error
+        this.#emit('error', new Error(message));
+      }
+      
+      // Second-level warning: 25 seconds (continued guidance)
+      if (duration > 25000 && !this.#secondLevelWarningShown) {
+        this.#secondLevelWarningShown = true;
+        const message = 'Continued performance constraints detected. For optimal quality in future recordings, consider closing other applications or reducing recording resolution.';
+        
+        console.info(`SlowTrackRecorder: ${message} (${durationSeconds}s backpressure)`);
+        // Emit as info event, not error
+        this.#emit('error', new Error(message));
+      }
+      
+      // Log periodic updates for debugging without user notification
+      if (duration > 30000 && durationSeconds % 10 === 0) {
+        console.log(`SlowTrackRecorder: Backpressure continues (${durationSeconds}s) - system adapting quality gracefully`);
+      }
+    }, 1000); // Check every second
+  }
+
+  /**
+   * Stop performance monitoring and reset warning state
+   */
+  #stopPerformanceMonitoring(): void {
+    if (this.#performanceCheckInterval !== null) {
+      clearInterval(this.#performanceCheckInterval);
+      this.#performanceCheckInterval = null;
+    }
+    
+    // Reset warning flags for next backpressure event
+    this.#firstLevelWarningShown = false;
+    this.#secondLevelWarningShown = false;
+  }
+
+  /**
+   * Track frame lifecycle for enhanced diagnostics and leak detection
+   * 
+   * @param frame - VideoFrame to track
+   * @param type - Type of frame ('original' from stream or 'normalized' for worker)
+   * @param operation - Description of the operation being performed
+   */
+  #trackFrameLifecycle(frame: VideoFrame, type: 'original' | 'normalized', operation: string): void {
+    const frameInfo = {
+      type,
+      operation,
+      created: performance.now()
+    };
+    
+    // Track for debugging and cleanup
+    this.#frameLifecycleMap.set(frame, frameInfo);
+    
+    if (type === 'original') {
+      this.#pendingOriginalFrames.add(frame);
+    } else {
+      this.#pendingNormalizedFrames.add(frame);
+    }
+    
+    // Debug: Warn about frames held too long (potential leak detection)
+    setTimeout(() => {
+      if (this.#frameLifecycleMap.has(frame)) {
+        const info = this.#frameLifecycleMap.get(frame)!;
+        const lifetime = performance.now() - info.created;
+        console.warn(`SlowTrackRecorder: Frame held for ${Math.round(lifetime)}ms, potential leak:`, {
+          type: info.type,
+          operation: info.operation,
+          timestamp: frame.timestamp,
+          lifetime: `${Math.round(lifetime)}ms`
+        });
+      }
+    }, this.#maxFrameLifetime);
+  }
+
+  /**
+   * Untrack frame when it's properly cleaned up
+   * 
+   * @param frame - VideoFrame to remove from tracking
+   */
+  #untrackFrameLifecycle(frame: VideoFrame): void {
+    this.#frameLifecycleMap.delete(frame);
+    this.#pendingOriginalFrames.delete(frame);
+    this.#pendingNormalizedFrames.delete(frame);
+  }
+
+  /**
    * Handle error messages from worker
    * 
    * @param errorMessage - Error message from worker
@@ -386,6 +532,15 @@ export class SlowTrackRecorder {
       this.#videoFrameCount = 0;
       this.#lastDiagnosticTime = 0;
       this.#recordingStartTime = performance.now();
+      
+      // Reset backpressure state for new recording
+      this.#isPumpPaused = false;
+      this.#pressureHighTimestamp = null;
+      this.#stopPerformanceMonitoring();
+      
+      // Reset user feedback state
+      this.#firstLevelWarningShown = false;
+      this.#secondLevelWarningShown = false;
 
       // 2. Extract Tracks
       const videoTrack = stream.getVideoTracks()[0];
@@ -482,6 +637,7 @@ export class SlowTrackRecorder {
       this.#recordingStartTime = null;
       this.#videoTransformStream = null;
       this.#audioTransformStream = null;
+      this.#stopPerformanceMonitoring();
 
       this.#emit('error', error instanceof Error ? error : new Error(String(error)));
       throw error; // Re-throw to caller
@@ -518,6 +674,9 @@ export class SlowTrackRecorder {
       }
     }
     this.#pendingOriginalFrames.clear();
+    
+    // Clear frame lifecycle tracking
+    this.#frameLifecycleMap.clear();
     
     // Clean up any pending original audio frames
     for (const frame of this.#pendingOriginalAudioFrames) {
@@ -597,6 +756,9 @@ export class SlowTrackRecorder {
     // Reset state
     this.#isWorkerReady = false;
     this.#shouldStopProcessing = false;
+    this.#isPumpPaused = false;
+    this.#pressureHighTimestamp = null;
+    this.#stopPerformanceMonitoring();
   }
 
   /**
@@ -655,6 +817,12 @@ export class SlowTrackRecorder {
           break;
         }
 
+        // **KEY CHANGE**: Wait here if the pump is paused due to backpressure
+        if (this.#isPumpPaused) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          continue; // Re-check conditions without reading new frames
+        }
+
         let readResult;
         try {
           readResult = await reader.read();
@@ -675,9 +843,9 @@ export class SlowTrackRecorder {
           break; // The stream has ended.
         }
 
-        // Track the original frame to ensure cleanup
+        // Track the original frame to ensure cleanup with enhanced diagnostics
         if (frame) {
-          this.#pendingOriginalFrames.add(frame);
+          this.#trackFrameLifecycle(frame, 'original', 'received_from_stream');
         }
 
         // We wrap the processing of each frame to ensure the original is always closed.
@@ -710,35 +878,39 @@ export class SlowTrackRecorder {
             duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
           });
 
-          // Track this frame to ensure cleanup
-          this.#pendingNormalizedFrames.add(normalizedFrame);
+          // Track this frame to ensure cleanup with enhanced diagnostics
+          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
 
           // Forward the newly timestamped frame to the worker.
-          // Use fire-and-forget write with proper error handling
+          // Use robust try/catch/finally pattern for guaranteed cleanup
           const frameId = this.#videoFrameCount; // Track frame for debugging
-          writer.write(normalizedFrame).then(() => {
-            // Frame successfully queued - worker will handle closing it
+          try {
+            await writer.write(normalizedFrame);
+            // Frame successfully queued - worker now owns the frame
             if (frameId % 50 === 0) {
               console.log(`SlowTrackRecorder: Frame ${frameId} successfully queued to worker`);
             }
-          }).catch(writeError => {
+          } catch (writeError) {
             console.warn(`SlowTrackRecorder: Video frame ${frameId} write failed (expected during high load):`, writeError instanceof Error ? writeError.message : String(writeError));
-            // Clean up the normalized frame if write failed
+            // If write fails, we MUST close the frame here to prevent a leak
             try {
               normalizedFrame.close();
-              this.#pendingNormalizedFrames.delete(normalizedFrame);
               console.log(`SlowTrackRecorder: Closed failed frame ${frameId}`);
             } catch (closeError) {
               // Frame might have been closed already, ignore
+              console.warn(`SlowTrackRecorder: Error closing failed frame ${frameId}:`, closeError);
             }
-          });
+          } finally {
+            // ALWAYS remove the frame from the tracking set once it's been handled
+            this.#untrackFrameLifecycle(normalizedFrame);
+          }
 
         } finally {
           // CRITICAL: Close the original frame to release its underlying memory,
           // even if the processing logic above throws an error.
           frame.close();
-          // Remove from tracking
-          this.#pendingOriginalFrames.delete(frame);
+          // Remove from tracking with enhanced diagnostics
+          this.#untrackFrameLifecycle(frame);
         }
       }
     } catch (error) {
@@ -774,6 +946,13 @@ export class SlowTrackRecorder {
         if (this.#shouldStopProcessing) {
           console.log('SlowTrackRecorder: Stop signal received, terminating audio processing loop');
           break;
+        }
+
+        // **SYNCHRONIZED PUMP CONTROL**: Wait here if the pump is paused due to backpressure
+        // This ensures both audio and video processing pause together, maintaining A/V sync
+        if (this.#isPumpPaused) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          continue; // Re-check conditions without reading new frames
         }
 
         let readResult;

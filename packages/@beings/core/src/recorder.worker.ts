@@ -59,6 +59,14 @@ let videoFramesDropped = 0;
 let totalVideoTimeProcessed = 0; // Total video time in milliseconds
 let totalAudioTimeProcessed = 0; // Total audio time in milliseconds
 
+// Event-driven backpressure management with hysteresis
+const HIGH_WATER_MARK = 30; // Start throttling
+const LOW_WATER_MARK = 10;  // Resume processing
+const HYSTERESIS_COOLDOWN_MS = 1000; // Prevent flapping with 1-second cooldown
+let isThrottled = false;
+let lastLowPressureTimestamp = 0;
+let consecutiveHighPressureCount = 0;
+
 /**
  * Calculate scaled dimensions that fit within hardware limits while preserving aspect ratio
  * 
@@ -130,6 +138,57 @@ function sendSyncUpdate(): void {
     type: 'sync-update',
     syncData
   });
+}
+
+/**
+ * Check encoder queue size and emit backpressure events when thresholds are crossed
+ * This implements event-driven flow control with hysteresis to prevent system flapping
+ */
+function checkQueueAndNotify(): void {
+  if (!videoEncoder) return;
+  
+  const queueSize = videoEncoder.encodeQueueSize;
+  const audioQueueSize = audioEncoder?.encodeQueueSize || 0;
+  const currentTime = performance.now();
+
+  if (queueSize > HIGH_WATER_MARK && !isThrottled) {
+    // Check hysteresis: only trigger high pressure if sufficient cooldown has elapsed
+    const timeSinceLastLow = currentTime - lastLowPressureTimestamp;
+    
+    if (timeSinceLastLow >= HYSTERESIS_COOLDOWN_MS || lastLowPressureTimestamp === 0) {
+      isThrottled = true;
+      consecutiveHighPressureCount++;
+      
+      // Calculate exponential backoff for repeated high pressure conditions
+      const backoffMultiplier = Math.min(consecutiveHighPressureCount, 4); // Cap at 4x
+      
+      console.warn(`Worker: Backpressure HIGH (attempt ${consecutiveHighPressureCount}, backoff ${backoffMultiplier}x) - video queue: ${queueSize}, audio queue: ${audioQueueSize}`);
+      self.postMessage({ 
+        type: 'pressure', 
+        status: 'high',
+        videoQueueSize: queueSize,
+        audioQueueSize: audioQueueSize,
+        consecutiveCount: consecutiveHighPressureCount,
+        backoffMultiplier: backoffMultiplier
+      });
+    } else {
+      // Within cooldown period, log but don't emit event
+      console.log(`Worker: Queue high (${queueSize}) but within hysteresis cooldown (${Math.round(timeSinceLastLow)}ms < ${HYSTERESIS_COOLDOWN_MS}ms)`);
+    }
+  } else if (queueSize < LOW_WATER_MARK && isThrottled) {
+    isThrottled = false;
+    lastLowPressureTimestamp = currentTime;
+    consecutiveHighPressureCount = 0; // Reset consecutive counter
+    
+    console.log(`Worker: Backpressure LOW - video queue: ${queueSize}, audio queue: ${audioQueueSize} (cooldown starts now)`);
+    self.postMessage({ 
+      type: 'pressure', 
+      status: 'low',
+      videoQueueSize: queueSize,
+      audioQueueSize: audioQueueSize,
+      cooldownStartTime: currentTime
+    });
+  }
 }
 
 /**
@@ -1261,6 +1320,8 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
           if (muxer) {
             muxer.addVideoChunk(chunk, metadata || {});
           }
+          // Check queue status after processing each chunk for responsive backpressure
+          checkQueueAndNotify();
         } catch (error) {
           console.error('Worker: Video muxer error:', error);
           self.postMessage({ type: 'error', error: error instanceof Error ? error.message : String(error) });
@@ -1347,6 +1408,11 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
       if (!frame) {
         console.warn('Worker: Received null/undefined frame, skipping');
         continue;
+      }
+      
+      // Debug: Track frame receipt in worker
+      if (videoFramesProcessed % 50 === 0) {
+        console.log(`Worker: Received frame ${videoFramesProcessed + 1} from main thread`);
       }
       
       // Debug: Log frame processing for debugging memory leaks
@@ -1578,17 +1644,39 @@ async function handleStopMessage(): Promise<void> {
       console.log('Worker: Attempting to drain remaining video frames...');
       try {
         let frameCount = 0;
-        while (true) {
-          const { done, value: frame } = await streamReader.read();
-          if (done) {
-            console.log('Worker: Video stream drain completed - no more frames');
-            break;
+        let drainAttempts = 0;
+        const maxDrainAttempts = 10; // Prevent infinite loop
+        
+        while (drainAttempts < maxDrainAttempts) {
+          try {
+            const result = await Promise.race([
+              streamReader.read(),
+              new Promise<ReadableStreamReadResult<VideoFrame>>((_, reject) => 
+                setTimeout(() => reject(new Error('drain timeout')), 100)
+              )
+            ]);
+            
+            const { done, value: frame } = result;
+            
+            if (done) {
+              console.log('Worker: Video stream drain completed - no more frames');
+              break;
+            }
+            if (frame) {
+              frame.close(); // Close any remaining frames
+              frameCount++;
+              console.log(`Worker: Drained and closed frame ${frameCount}`);
+            }
+          } catch (readError) {
+            if (readError instanceof Error && readError.message === 'drain timeout') {
+              console.log('Worker: Stream read timeout during drain, assuming empty');
+              break;
+            }
+            throw readError;
           }
-          if (frame) {
-            frame.close(); // Close any remaining frames
-            frameCount++;
-          }
+          drainAttempts++;
         }
+        
         if (frameCount > 0) {
           console.log(`Worker: Drained and closed ${frameCount} remaining video frames`);
         } else {
@@ -1605,14 +1693,35 @@ async function handleStopMessage(): Promise<void> {
     if (audioStreamReader) {
       try {
         let frameCount = 0;
-        while (true) {
-          const { done, value: frame } = await audioStreamReader.read();
-          if (done) break;
-          if (frame) {
-            frame.close(); // Close any remaining audio frames
-            frameCount++;
+        let drainAttempts = 0;
+        const maxDrainAttempts = 10;
+        
+        while (drainAttempts < maxDrainAttempts) {
+          try {
+            const result = await Promise.race([
+              audioStreamReader.read(),
+              new Promise<ReadableStreamReadResult<AudioData>>((_, reject) => 
+                setTimeout(() => reject(new Error('drain timeout')), 100)
+              )
+            ]);
+            
+            const { done, value: frame } = result;
+            
+            if (done) break;
+            if (frame) {
+              frame.close(); // Close any remaining audio frames
+              frameCount++;
+            }
+          } catch (readError) {
+            if (readError instanceof Error && readError.message === 'drain timeout') {
+              console.log('Worker: Audio stream read timeout during drain, assuming empty');
+              break;
+            }
+            throw readError;
           }
+          drainAttempts++;
         }
+        
         if (frameCount > 0) {
           console.log(`Worker: Drained and closed ${frameCount} remaining audio frames`);
         }
