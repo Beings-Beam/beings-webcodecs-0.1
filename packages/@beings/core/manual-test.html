@@ -704,6 +704,24 @@
                     </div>
                     
                     <div class="stats-section">
+                        <h4>Source Audio Details</h4>
+                        <div>Sample Rate (Hz): <span id="sourceSampleRate">--</span></div>
+                        <div>Bit Depth (sampleSize): <span id="sourceBitDepth">--</span></div>
+                        <div>Channel Count: <span id="sourceChannelCount">--</span></div>
+                        <div>Latency: <span id="sourceLatency">--</span></div>
+                        <div>Echo Cancellation: <span id="sourceEchoCancellation">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <h4>Recording Audio Details</h4>
+                        <div>Codec: <span id="recordingAudioCodec">--</span></div>
+                        <div>Sample Rate (Hz): <span id="recordingSampleRate">--</span></div>
+                        <div>Channel Count: <span id="recordingChannelCount">--</span></div>
+                        <div>Bitrate: <span id="recordingBitrate">--</span></div>
+                        <div>Processing Status: <span id="recordingAudioStatus">--</span></div>
+                    </div>
+                    
+                    <div class="stats-section">
                         <h4>Codec Details</h4>
                         <div>Active Codec: <span id="activeCodec">--</span></div>
                         <div>Profile/Level: <span id="profileLevel">--</span></div>
@@ -2138,6 +2156,66 @@
                 mediaStream = await navigator.mediaDevices.getDisplayMedia(constraints);
                 console.log('Stream captured:', mediaStream);
                 
+                // Update source audio details from captured stream
+                const sourceAudioTrack = mediaStream.getAudioTracks()[0];
+                if (sourceAudioTrack) {
+                    const audioSettings = sourceAudioTrack.getSettings();
+                    console.log('Source Audio Track Settings:', audioSettings);
+                    
+                    // Update Source Audio Details panel
+                    const sourceSampleRateSpan = document.getElementById('sourceSampleRate');
+                    const sourceBitDepthSpan = document.getElementById('sourceBitDepth');
+                    const sourceChannelCountSpan = document.getElementById('sourceChannelCount');
+                    const sourceLatencySpan = document.getElementById('sourceLatency');
+                    const sourceEchoCancellationSpan = document.getElementById('sourceEchoCancellation');
+                    
+                    if (sourceSampleRateSpan) {
+                        sourceSampleRateSpan.textContent = audioSettings.sampleRate ? audioSettings.sampleRate.toString() : 'Unknown';
+                        sourceSampleRateSpan.style.color = audioSettings.sampleRate ? '#4CAF50' : '#FF9800';
+                    }
+                    
+                    if (sourceBitDepthSpan) {
+                        sourceBitDepthSpan.textContent = audioSettings.sampleSize ? `${audioSettings.sampleSize} bits` : 'Unknown';
+                        sourceBitDepthSpan.style.color = audioSettings.sampleSize ? '#4CAF50' : '#FF9800';
+                    }
+                    
+                    if (sourceChannelCountSpan) {
+                        const channelCount = audioSettings.channelCount || 'Unknown';
+                        const channelLabel = channelCount === 1 ? '1 (Mono)' : channelCount === 2 ? '2 (Stereo)' : channelCount === 'Unknown' ? 'Unknown' : `${channelCount}`;
+                        sourceChannelCountSpan.textContent = channelLabel;
+                        sourceChannelCountSpan.style.color = channelCount !== 'Unknown' ? '#4CAF50' : '#FF9800';
+                        
+                        // Add visual indicator for channel type
+                        if (channelCount === 1) {
+                            sourceChannelCountSpan.style.borderLeft = '3px solid #FF9800'; // Orange for mono
+                        } else if (channelCount === 2) {
+                            sourceChannelCountSpan.style.borderLeft = '3px solid #4CAF50'; // Green for stereo
+                        }
+                        sourceChannelCountSpan.style.paddingLeft = '8px';
+                    }
+                    
+                    if (sourceLatencySpan) {
+                        sourceLatencySpan.textContent = audioSettings.latency ? `${(audioSettings.latency * 1000).toFixed(1)}ms` : 'Unknown';
+                        sourceLatencySpan.style.color = audioSettings.latency ? '#4CAF50' : '#FF9800';
+                    }
+                    
+                    if (sourceEchoCancellationSpan) {
+                        const echoCancellation = audioSettings.echoCancellation;
+                        sourceEchoCancellationSpan.textContent = echoCancellation !== undefined ? (echoCancellation ? 'Enabled' : 'Disabled') : 'Unknown';
+                        sourceEchoCancellationSpan.style.color = echoCancellation !== undefined ? '#4CAF50' : '#FF9800';
+                    }
+                } else {
+                    // No audio track found - update all fields to indicate no audio
+                    const audioDetailSpans = ['sourceSampleRate', 'sourceBitDepth', 'sourceChannelCount', 'sourceLatency', 'sourceEchoCancellation'];
+                    audioDetailSpans.forEach(spanId => {
+                        const span = document.getElementById(spanId);
+                        if (span) {
+                            span.textContent = 'No Audio';
+                            span.style.color = '#757575'; // Gray for disabled
+                        }
+                    });
+                }
+                
                 // Update video input stats from captured stream
                 const videoTrack = mediaStream.getVideoTracks()[0];
                 if (videoTrack) {
@@ -2342,6 +2420,97 @@
                     };
                     console.log('Audio configuration:', recorderConfig.audio);
                     
+                    // Update Recording Audio Details panel
+                    const recordingAudioCodecSpan = document.getElementById('recordingAudioCodec');
+                    const recordingSampleRateSpan = document.getElementById('recordingSampleRate');
+                    const recordingChannelCountSpan = document.getElementById('recordingChannelCount');
+                    const recordingBitrateSpan = document.getElementById('recordingBitrate');
+                    const recordingAudioStatusSpan = document.getElementById('recordingAudioStatus');
+                    
+                    if (recordingAudioCodecSpan) {
+                        recordingAudioCodecSpan.textContent = audioCodec.toUpperCase();
+                        recordingAudioCodecSpan.style.color = '#4CAF50';
+                    }
+                    
+                    if (recordingSampleRateSpan) {
+                        recordingSampleRateSpan.textContent = actualSampleRate.toString();
+                        recordingSampleRateSpan.style.color = '#4CAF50';
+                    }
+                    
+                    if (recordingChannelCountSpan) {
+                        const channelLabel = actualChannels === 1 ? '1 (Mono)' : actualChannels === 2 ? '2 (Stereo)' : `${actualChannels}`;
+                        recordingChannelCountSpan.textContent = channelLabel;
+                        recordingChannelCountSpan.style.color = '#4CAF50';
+                        
+                        // Add visual indicator for channel type
+                        if (actualChannels === 1) {
+                            recordingChannelCountSpan.style.borderLeft = '3px solid #FF9800'; // Orange for mono
+                        } else if (actualChannels === 2) {
+                            recordingChannelCountSpan.style.borderLeft = '3px solid #4CAF50'; // Green for stereo
+                        }
+                        recordingChannelCountSpan.style.paddingLeft = '8px';
+                    }
+                    
+                    if (recordingBitrateSpan) {
+                        const bitrateKbps = (recorderConfig.audio.bitrate / 1000).toFixed(0);
+                        recordingBitrateSpan.textContent = `${bitrateKbps} kbps`;
+                        recordingBitrateSpan.style.color = '#4CAF50';
+                    }
+                    
+                    if (recordingAudioStatusSpan) {
+                        recordingAudioStatusSpan.textContent = 'Configured';
+                        recordingAudioStatusSpan.style.color = '#2196F3'; // Blue for configured
+                    }
+                    
+                    // Add comparison indicators between source and recording audio
+                    setTimeout(() => {
+                        const sourceSampleRateSpan = document.getElementById('sourceSampleRate');
+                        const recordingSampleRateSpan = document.getElementById('recordingSampleRate');
+                        const sourceChannelCountSpan = document.getElementById('sourceChannelCount');
+                        const recordingChannelCountSpan = document.getElementById('recordingChannelCount');
+                        
+                        // Compare sample rates
+                        if (sourceSampleRateSpan && recordingSampleRateSpan) {
+                            const sourceRate = parseInt(sourceSampleRateSpan.textContent || '0');
+                            const recordingRate = parseInt(recordingSampleRateSpan.textContent || '0');
+                            
+                            if (sourceRate > 0 && recordingRate > 0) {
+                                if (sourceRate === recordingRate) {
+                                    // Matching sample rates - good
+                                    sourceSampleRateSpan.style.borderRight = '3px solid #4CAF50';
+                                    recordingSampleRateSpan.style.borderLeft = '3px solid #4CAF50';
+                                } else {
+                                    // Different sample rates - potential issue
+                                    sourceSampleRateSpan.style.borderRight = '3px solid #FF9800';
+                                    recordingSampleRateSpan.style.borderLeft = '3px solid #FF9800';
+                                }
+                                sourceSampleRateSpan.style.paddingRight = '8px';
+                                recordingSampleRateSpan.style.paddingLeft = '8px';
+                            }
+                        }
+                        
+                        // Compare channel counts
+                        if (sourceChannelCountSpan && recordingChannelCountSpan) {
+                            const sourceChannels = sourceChannelCountSpan.textContent?.includes('1') ? 1 : 
+                                                 sourceChannelCountSpan.textContent?.includes('2') ? 2 : 0;
+                            const recordingChannels = recordingChannelCountSpan.textContent?.includes('1') ? 1 : 
+                                                     recordingChannelCountSpan.textContent?.includes('2') ? 2 : 0;
+                            
+                            if (sourceChannels > 0 && recordingChannels > 0) {
+                                if (sourceChannels === recordingChannels) {
+                                    // Matching channel counts - good
+                                    sourceChannelCountSpan.style.borderRight = '3px solid #4CAF50';
+                                    recordingChannelCountSpan.style.borderLeft = '3px solid #4CAF50';
+                                } else {
+                                    // Different channel counts - potential issue
+                                    sourceChannelCountSpan.style.borderRight = '3px solid #FF9800';
+                                    recordingChannelCountSpan.style.borderLeft = '3px solid #FF9800';
+                                }
+                                sourceChannelCountSpan.style.paddingRight = '8px';
+                            }
+                        }
+                    }, 100); // Small delay to ensure source audio details are populated
+                    
                     // Update audio input stats display with detected format
                     const audioInputSpan = document.getElementById('audioInput');
                     if (audioInputSpan) {
@@ -2366,6 +2535,18 @@
                         audioInputSpan.style.borderLeft = 'none';
                         audioInputSpan.style.paddingLeft = '0px';
                     }
+                    
+                    // Update Recording Audio Details panel for disabled audio
+                    const recordingAudioSpans = ['recordingAudioCodec', 'recordingSampleRate', 'recordingChannelCount', 'recordingBitrate', 'recordingAudioStatus'];
+                    recordingAudioSpans.forEach(spanId => {
+                        const span = document.getElementById(spanId);
+                        if (span) {
+                            span.textContent = 'Disabled';
+                            span.style.color = '#757575'; // Gray for disabled
+                            span.style.borderLeft = 'none';
+                            span.style.paddingLeft = '0px';
+                        }
+                    });
                 }
                 
                 recorder = new SlowTrackRecorder(recorderConfig);
@@ -2374,6 +2555,13 @@
                 showStatus('Detecting optimal codec...', 'info');
                 await recorder.start(mediaStream);
                 console.log('Recording started');
+                
+                // Update Recording Audio Status to "Active" when recording starts
+                const recordingAudioStatusSpan = document.getElementById('recordingAudioStatus');
+                if (recordingAudioStatusSpan && audioEnabled) {
+                    recordingAudioStatusSpan.textContent = 'Active';
+                    recordingAudioStatusSpan.style.color = '#4CAF50'; // Green for active
+                }
                 
                 // Wait a moment for the worker to determine the codec and send the 'ready' message
                 // The codec determination happens asynchronously in the worker
@@ -2486,6 +2674,13 @@
                 const blob = await recorder.stop();
                 console.log('Recording stopped, blob created:', blob);
                 showStatus('Recording completed successfully!', 'success');
+                
+                // Update Recording Audio Status to "Completed"
+                const recordingAudioStatusSpan = document.getElementById('recordingAudioStatus');
+                if (recordingAudioStatusSpan && recordingAudioStatusSpan.textContent !== 'Disabled') {
+                    recordingAudioStatusSpan.textContent = 'Completed';
+                    recordingAudioStatusSpan.style.color = '#9C27B0'; // Purple for completed
+                }
 
                 // Create object URL for the video blob
                 const videoUrl = URL.createObjectURL(blob);

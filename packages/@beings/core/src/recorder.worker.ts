@@ -152,36 +152,97 @@ function upmixMonoToStereo(monoAudioData: AudioData): AudioData {
     const numberOfFrames = monoAudioData.numberOfFrames;
     const timestamp = monoAudioData.timestamp;
     const duration = monoAudioData.duration;
+    const originalFormat = monoAudioData.format;
     
-    // Calculate buffer size for stereo (2 channels)
-    const stereoBufferSize = numberOfFrames * 2; // 2 channels
+    console.log(`Worker: Upmixing mono to stereo - preserving original format: ${originalFormat}`);
     
-    // Create stereo buffer
-    const stereoBuffer = new Float32Array(stereoBufferSize);
+    // Preserve the original format to prevent bit depth corruption
+    // Check if the original format is 16-bit integer (s16 or s16-planar)
+    const is16Bit = originalFormat === 's16' || originalFormat === 's16-planar';
     
-    // Copy mono data to a temporary buffer
-    const monoBuffer = new Float32Array(numberOfFrames);
-    monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
-    
-    // Duplicate mono samples to both stereo channels (interleaved format)
-    for (let i = 0; i < numberOfFrames; i++) {
-      const sample = monoBuffer[i];
-      stereoBuffer[i * 2] = sample;     // Left channel
-      stereoBuffer[i * 2 + 1] = sample; // Right channel
+    if (is16Bit) {
+      // Handle 16-bit integer format - preserve bit depth
+      const stereoBufferSize = numberOfFrames * 2; // 2 channels, interleaved
+      const stereoBuffer = new Int16Array(stereoBufferSize);
+      
+      // Format-aware copying - check actual input format to prevent corruption
+      const inputFormat = monoAudioData.format;
+      console.log(`Worker: Input format detected: ${inputFormat}, treating as 16-bit output`);
+      
+      if (inputFormat && inputFormat.startsWith('f32')) {
+        // Source is 32-bit float, convert to 16-bit integer
+        console.log('Worker: Converting float32 input to int16 output');
+        const monoBuffer = new Float32Array(numberOfFrames);
+        monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
+        
+        // Convert float samples to 16-bit integers (with proper scaling)
+        for (let i = 0; i < numberOfFrames; i++) {
+          const sample = Math.max(-1, Math.min(1, monoBuffer[i])); // Clamp to valid range
+          const intSample = Math.round(sample * 32767); // Convert to 16-bit range
+          stereoBuffer[i * 2] = intSample;     // Left channel
+          stereoBuffer[i * 2 + 1] = intSample; // Right channel
+        }
+        
+      } else if (inputFormat && inputFormat.startsWith('s16')) {
+        // Source is already 16-bit integer, just copy directly (no conversion!)
+        console.log('Worker: Copying int16 input to int16 output (no conversion)');
+        const monoBuffer = new Int16Array(numberOfFrames);
+        monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
+        
+        // Direct copy - no format conversion needed
+        for (let i = 0; i < numberOfFrames; i++) {
+          const sample = monoBuffer[i];
+          stereoBuffer[i * 2] = sample;     // Left channel
+          stereoBuffer[i * 2 + 1] = sample; // Right channel
+        }
+        
+      } else {
+        // Handle other formats or throw an error
+        throw new Error(`Unsupported source audio format for upmixing: ${inputFormat}`);
+      }
+      
+      // Create new stereo AudioData frame with preserved 16-bit format
+      const stereoAudioData = new AudioData({
+        format: 's16', // Preserve 16-bit integer format
+        sampleRate: sampleRate,
+        numberOfChannels: 2,
+        numberOfFrames: numberOfFrames,
+        timestamp: timestamp,
+        data: stereoBuffer
+      });
+      
+      console.log(`Worker: ✅ Upmixed mono to stereo - preserved 16-bit format - ${numberOfFrames} frames @ ${sampleRate}Hz`);
+      return stereoAudioData;
+      
+    } else {
+      // Handle float formats - use original logic but preserve format
+      const stereoBufferSize = numberOfFrames * 2; // 2 channels
+      const stereoBuffer = new Float32Array(stereoBufferSize);
+      
+      // Copy mono data to a temporary buffer
+      const monoBuffer = new Float32Array(numberOfFrames);
+      monoAudioData.copyTo(monoBuffer, { planeIndex: 0 });
+      
+      // Duplicate mono samples to both stereo channels (interleaved format)
+      for (let i = 0; i < numberOfFrames; i++) {
+        const sample = monoBuffer[i];
+        stereoBuffer[i * 2] = sample;     // Left channel
+        stereoBuffer[i * 2 + 1] = sample; // Right channel
+      }
+      
+      // Create new stereo AudioData frame with preserved float format
+      const stereoAudioData = new AudioData({
+        format: (originalFormat && originalFormat.includes('planar')) ? 'f32-planar' : 'f32',
+        sampleRate: sampleRate,
+        numberOfChannels: 2,
+        numberOfFrames: numberOfFrames,
+        timestamp: timestamp,
+        data: stereoBuffer
+      });
+      
+      console.log(`Worker: Upmixed mono to stereo - preserved float format: ${originalFormat} - ${numberOfFrames} frames @ ${sampleRate}Hz`);
+      return stereoAudioData;
     }
-    
-    // Create new stereo AudioData frame
-    const stereoAudioData = new AudioData({
-      format: 'f32-planar', // Use planar format for better compatibility
-      sampleRate: sampleRate,
-      numberOfChannels: 2,
-      numberOfFrames: numberOfFrames,
-      timestamp: timestamp,
-      data: stereoBuffer
-    });
-    
-    console.log(`Worker: Upmixed mono to stereo - ${numberOfFrames} frames @ ${sampleRate}Hz`);
-    return stereoAudioData;
     
   } catch (error) {
     console.error('Worker: Error in upmixMonoToStereo:', error);
