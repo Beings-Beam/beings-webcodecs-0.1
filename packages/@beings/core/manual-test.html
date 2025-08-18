@@ -180,44 +180,446 @@
         }
 
         /* Grid layout for larger screens */
-        .sections-grid {
+        /* New Dashboard Layout */
+        .dashboard-layout {
             display: grid;
-            gap: 24px;
             grid-template-columns: 1fr;
-            grid-template-areas: 
-                "main"
-                "sidebar"
-                "results";
+            gap: 32px;
+            min-height: calc(100vh - 120px);
         }
 
-        @media (min-width: 900px) {
-            .sections-grid {
-                grid-template-columns: 3fr 7fr;
-                grid-template-areas: 
-                    "main sidebar"
-                    "results results";
-                gap: 32px;
+        @media (min-width: 1000px) {
+            .dashboard-layout {
+                grid-template-columns: 1fr 1fr;
+                gap: 40px;
             }
         }
-        
-        .section.main-section {
-            grid-area: main;
+
+        /* Interaction Panel (Left Column) */
+        .interaction-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Diagnostics Panel (Right Column) */
+        .diagnostics-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
         
-        .section.sidebar-section {
-            grid-area: sidebar;
+        /* Card-Based Design */
+        .workflow-card, .results-card, .stats-group, .settings-accordion, .quick-look-hud {
+            background: var(--section-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
-        
-        .section.results-section {
-            grid-area: results;
+
+        /* Status Bar */
+        .status-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, var(--info-bg) 0%, var(--section-bg) 100%);
+            border: 1px solid var(--info-border);
+            border-radius: 6px;
+            margin-bottom: 24px;
+            font-size: 12px;
         }
-        
-        /* Results section specific styling */
-        @media (min-width: 900px) {
-            .section.results-section {
-                /* Full width on desktop, so we can use more space efficiently */
-                max-width: none;
-            }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-label {
+            font-weight: 500;
+            color: var(--text-color);
+            opacity: 0.8;
+        }
+
+        .status-value {
+            font-weight: 600;
+            color: var(--info-color);
+        }
+
+        /* Workflow Steps */
+        .workflow-steps {
+            display: flex;
+            flex-direction: row;
+            gap: 8px;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+
+        .workflow-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 8px;
+            background: transparent;
+            transition: all 0.3s ease;
+            flex: 1;
+            min-width: 60px;
+        }
+
+        .step-indicator {
+            position: relative;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+
+        .step-check {
+            width: 20px;
+            height: 20px;
+            background: var(--success-color);
+            color: white;
+            border-radius: 50%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .workflow-step[data-state="completed"] .step-check {
+            display: flex;
+        }
+
+        .step-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        /* Settings Accordion */
+        .settings-accordion {
+            margin-bottom: 16px;
+        }
+
+        .settings-accordion summary {
+            padding: 16px 20px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--section-bg) 0%, var(--border-color) 100%);
+            border-radius: 6px;
+            user-select: none;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .settings-accordion summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .settings-accordion summary::after {
+            content: '▼';
+            font-size: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        .settings-accordion[open] summary::after {
+            transform: rotate(180deg);
+        }
+
+        .settings-accordion[open] summary {
+            border-bottom: 1px solid var(--border-color);
+            border-radius: 6px 6px 0 0;
+        }
+
+        .settings-content {
+            padding: 24px;
+        }
+
+        .settings-group {
+            margin-bottom: 24px;
+        }
+
+        .settings-group h4 {
+            margin: 0 0 16px 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-color);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+        }
+
+        .setting-item {
+            margin-bottom: 16px;
+        }
+
+        .setting-item label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--text-color);
+            font-size: 12px;
+        }
+
+        .setting-item select,
+        .setting-item input[type="number"] {
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--section-bg);
+            color: var(--text-color);
+            font-size: 12px;
+            width: 100%;
+        }
+
+        .setting-item input[type="range"] {
+            width: 100%;
+            margin-bottom: 4px;
+        }
+
+        .range-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--text-color);
+            opacity: 0.7;
+        }
+
+        .setting-hint {
+            font-size: 11px;
+            color: var(--text-color);
+            opacity: 0.7;
+            margin-top: 4px;
+            display: block;
+        }
+
+        .checkbox-label {
+            display: flex !important;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .processing-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .processing-toggle label {
+            font-size: 11px;
+            margin-bottom: 0;
+        }
+
+        /* Diagnostics Header */
+        .diagnostics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .diagnostics-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .diagnostics-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+        }
+
+        .diagnostics-controls input[type="range"] {
+            width: 80px;
+        }
+
+        /* Quick Look HUD */
+        .quick-look-hud {
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, var(--success-bg) 0%, var(--section-bg) 100%);
+            border-color: var(--success-border);
+        }
+
+        .quick-look-hud h3 {
+            margin: 0 0 16px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--success-color);
+        }
+
+        .hud-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .hud-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+        }
+
+        .metric-label {
+            font-weight: 500;
+            color: var(--text-color);
+            opacity: 0.8;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            font-family: monospace;
+        }
+
+        /* Stats Groups */
+        .stats-accordion-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .stats-group {
+            margin-bottom: 0;
+            padding: 0;
+        }
+
+        .stats-group summary {
+            padding: 16px 20px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--section-bg) 0%, var(--border-color) 100%);
+            border-radius: 6px;
+            user-select: none;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stats-group summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .stats-group summary::after {
+            content: '▼';
+            font-size: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        .stats-group[open] summary::after {
+            transform: rotate(180deg);
+        }
+
+        .stats-group[open] summary {
+            border-bottom: 1px solid var(--border-color);
+            border-radius: 6px 6px 0 0;
+        }
+
+        .stats-content {
+            padding: 20px;
+        }
+
+        .stats-subsection {
+            margin-bottom: 20px;
+        }
+
+        .stats-subsection:last-child {
+            margin-bottom: 0;
+        }
+
+        .stats-subsection h5 {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-color);
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            line-height: 1.3;
+        }
+
+        .stat-item span {
+            font-weight: 600;
+        }
+
+        /* Standardized Color System */
+        .stat-excellent, .metric-value.excellent {
+            color: var(--success-color) !important;
+        }
+
+        .stat-good, .metric-value.good {
+            color: var(--success-color) !important;
+            opacity: 0.8;
+        }
+
+        .stat-warning, .metric-value.warning {
+            color: #FF9800 !important;
+        }
+
+        .stat-critical, .metric-value.critical {
+            color: var(--error-color) !important;
+        }
+
+        .stat-enabled, .metric-value.enabled {
+            color: var(--success-color) !important;
+        }
+
+        .stat-enabled::before, .metric-value.enabled::before {
+            content: '✓ ';
+            font-weight: bold;
+        }
+
+        .stat-disabled, .metric-value.disabled {
+            color: #666 !important;
+        }
+
+        .stat-disabled::before, .metric-value.disabled::before {
+            content: '✗ ';
+            font-weight: bold;
+            opacity: 0.6;
+        }
+
+        /* Size visualization bars */
+        .stat-item span[data-percentage] {
+            position: relative;
+            padding-left: 8px;
+        }
+
+        .stat-item span[data-percentage]::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 2px;
+            background: var(--info-color);
+            width: var(--percentage, 0%);
+            opacity: 0.3;
         }
         
         .controls {
@@ -318,7 +720,7 @@
             object-fit: contain;
         }
 
-        @media (min-width: 1200px) {
+        @media (min-width: 1000px) {
             video {
                 max-width: 800px;
             }
@@ -528,77 +930,132 @@
             </div>
         </div>
         
-        <div class="sections-grid">
-            <div class="section main-section">
+        <div class="dashboard-layout">
+            <!-- LEFT COLUMN: Primary Interaction -->
+            <section class="interaction-panel">
+                <div class="workflow-card">
+                    <!-- Persistent Status Bar -->
+                    <div class="status-bar">
+                        <div class="status-item">
+                            <span class="status-label">State:</span>
+                            <span class="status-value" id="workflowState">Initial</span>
+                        </div>
+                        <div class="status-item recording-only" style="display: none;">
+                            <span class="status-label">Duration:</span>
+                            <span class="status-value" id="recordingDuration">00:00</span>
+                        </div>
+                        <div class="status-item recording-only" style="display: none;">
+                            <span class="status-label">Size:</span>
+                            <span class="status-value" id="fileSize">0 MB</span>
+                        </div>
+                        <div class="status-item recording-only" style="display: none;">
+                            <span class="status-label">Codec:</span>
+                            <span class="status-value" id="activeCodecStatus">--</span>
+                        </div>
+                    </div>
+
+                    <!-- Preview Section -->
+                    <div class="preview-section">
                 <h2>Live Preview</h2>
                 <video id="preview" autoplay muted playsinline></video>
                 <div id="status"></div>
-                <div class="controls">
-                    <div style="margin-bottom: 16px;">
-                        <label for="resolutionSelector" style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-color);">Recording Resolution:</label>
-                        <select id="resolutionSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
-                            <option value="auto">Auto (Downscale to 1080p Max)</option>
-                            <option value="4k">Force 3840×2160 (4K)</option>
-                            <option value="1080p">Force 1920×1080 (1080p)</option>
-                            <option value="720p">Force 1280×720 (720p)</option>
-                            <option value="540p">Force 960×540 (540p)</option>
-                        </select>
+                    </div>
+                    <!-- Guided Workflow Steps -->
+                    <div class="workflow-steps">
+                                                <div class="workflow-step" data-step="1" data-state="enabled">
+                            <div class="step-indicator">
+                                <div class="step-check">✓</div>
+                    </div>
+                            <div class="step-content">
+                                <button id="openTabButton" title="Open YouTube Tab">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+                                    </svg>
+                                </button>
+                            </div>
                     </div>
 
-                    <div style="margin-bottom: 16px;">
-                        <label for="frameRateSelector" style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-color);">Frame Rate:</label>
-                        <select id="frameRateSelector" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
-                            <option value="auto">Auto</option>
-                            <option value="60">60 fps</option>
-                            <option value="30">30 fps</option>
-                        </select>
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <label for="forceFailCheckbox" style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text-color); cursor: pointer;">
-                            <input type="checkbox" id="forceFailCheckbox" style="margin: 0;">
-                            <span>Force H.264 Failure (for testing)</span>
-                        </label>
-                    </div>
-
-                    <div class="controls-row">
-                        <button id="openTabButton">1. Open YouTube Tab</button>
+                                                <div class="workflow-step" data-step="2" data-state="disabled">
+                            <div class="step-indicator">
+                                <div class="step-check">✓</div>
+                            </div>
+                            <div class="step-content">
                         <button id="screenshareButton" title="Start Screen Share">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
                             </svg>
                         </button>
+                            </div>
+                        </div>
+                        
+                                                <div class="workflow-step" data-step="3" data-state="disabled">
+                            <div class="step-indicator">
+                                <div class="step-check">✓</div>
+                            </div>
+                            <div class="step-content">
                         <button id="recordButton" disabled title="Start Recording">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                 <circle cx="12" cy="12" r="10" fill="currentColor"/>
                             </svg>
                         </button>
+                            </div>
+                        </div>
+                        
+                                                <div class="workflow-step" data-step="4" data-state="disabled">
+                            <div class="step-indicator">
+                                <div class="step-check">✓</div>
+                            </div>
+                            <div class="step-content">
                         <button id="stopButton" disabled title="Stop Recording">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                 <rect x="6" y="6" width="12" height="12" fill="currentColor"/>
                             </svg>
                         </button>
-                        <div class="record-time-chip" id="recordTimeChip">
-                            <div class="record-indicator"></div>
-                            <div class="chip-content">
-                                <span class="time-display" id="timeDisplay">00:00</span>
-                                <span class="size-display" id="sizeDisplay">0 MB</span>
+                            </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Advanced Encoder Settings -->
-                    <div style="margin-top: 24px; padding: 16px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--section-bg);">
-                        <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: var(--text-color);">⚙️ Advanced Encoder Settings</h4>
-                        
-                        <!-- Bitrate Control -->
-                        <div style="margin-bottom: 16px;">
-                            <label for="bitrateSlider" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
-                                Target Bitrate: <span id="bitrateValue">5.0 Mbps</span>
+                <!-- Collapsible Settings Accordion -->
+                <details class="settings-accordion">
+                    <summary>Recording Settings</summary>
+                    <div class="settings-content">
+                        <div class="settings-group">
+                            <h4>Basic Settings</h4>
+                            <div class="setting-item">
+                                <label for="resolutionSelector">Recording Resolution:</label>
+                                <select id="resolutionSelector">
+                                    <option value="auto">Auto (Downscale to 1080p Max)</option>
+                                    <option value="4k">Force 3840×2160 (4K)</option>
+                                    <option value="1080p">Force 1920×1080 (1080p)</option>
+                                    <option value="720p">Force 1280×720 (720p)</option>
+                                    <option value="540p">Force 960×540 (540p)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="setting-item">
+                                <label for="frameRateSelector">Frame Rate:</label>
+                                <select id="frameRateSelector">
+                                    <option value="auto">Auto</option>
+                                    <option value="60">60 fps</option>
+                                    <option value="30">30 fps</option>
+                                </select>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="forceFailCheckbox" class="checkbox-label">
+                                    <input type="checkbox" id="forceFailCheckbox">
+                                    <span>Force H.264 Failure (for testing)</span>
                             </label>
-                            <input type="range" id="bitrateSlider" min="1000000" max="20000000" step="500000" value="5000000" 
-                                   style="width: 100%; margin-bottom: 4px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-color); opacity: 0.7;">
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <h4>Advanced Encoder Settings</h4>
+                            <div class="setting-item">
+                                <label for="bitrateSlider">Target Bitrate: <span id="bitrateValue">5.0 Mbps</span></label>
+                                <input type="range" id="bitrateSlider" min="1000000" max="20000000" step="500000" value="5000000">
+                                <div class="range-labels">
                                 <span>1 Mbps</span>
                                 <span>5 Mbps</span>
                                 <span>10 Mbps</span>
@@ -607,63 +1064,47 @@
                             </div>
                         </div>
 
-                        <!-- Keyframe Interval Control -->
-                        <div style="margin-bottom: 16px;">
-                            <label for="keyframeInterval" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
-                                Keyframe Interval (seconds):
-                            </label>
-                            <input type="number" id="keyframeInterval" min="0.5" max="10" step="0.5" value="2" 
-                                   style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px; width: 80px;">
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Lower = better seeking, higher file size</span>
+                            <div class="setting-item">
+                                <label for="keyframeInterval">Keyframe Interval (seconds):</label>
+                                <input type="number" id="keyframeInterval" min="0.5" max="10" step="0.5" value="2">
+                                <span class="setting-hint">Lower = better seeking, higher file size</span>
                         </div>
 
-                        <!-- Hardware Acceleration Control -->
-                        <div style="margin-bottom: 16px;">
-                            <label for="hardwareAcceleration" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
-                                Hardware Acceleration:
-                            </label>
-                            <select id="hardwareAcceleration" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                            <div class="setting-item">
+                                <label for="hardwareAcceleration">Hardware Acceleration:</label>
+                                <select id="hardwareAcceleration">
                                 <option value="prefer-hardware">Prefer Hardware</option>
                                 <option value="prefer-software">Prefer Software</option>
                             </select>
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Use software if hardware fails</span>
+                                <span class="setting-hint">Use software if hardware fails</span>
                         </div>
 
-                        <!-- Codec Selection Control -->
-                        <div style="margin-bottom: 0;">
-                            <label for="codecSelection" style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-color); font-size: 12px;">
-                                Video Codec:
-                            </label>
-                            <select id="codecSelection" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); color: var(--text-color); font-size: 12px;">
+                            <div class="setting-item">
+                                <label for="codecSelection">Video Codec:</label>
+                                <select id="codecSelection">
                                 <option value="auto">Auto-detect (Recommended)</option>
                                 <option value="av1">AV1 (WebM)</option>
                                 <option value="hevc">HEVC (MP4)</option>
                                 <option value="h264">H.264 (MP4)</option>
                                 <option value="vp9">VP9 (WebM)</option>
                             </select>
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 8px;">Auto-detect tries AV1 → HEVC → H.264 → VP9</span>
+                                <span class="setting-hint">Auto-detect tries AV1 → HEVC → H.264 → VP9</span>
                         </div>
                     </div>
 
-                    <!-- Audio Settings -->
-                    <div style="margin-top: 24px; padding: 16px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--section-bg);">
-                        <h4 style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: var(--text-color);">🎵 Audio Settings</h4>
-                        
-                        <!-- Audio Enable Control -->
-                        <div style="margin-bottom: 16px;">
-                            <label for="audioEnabledCheckbox" style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text-color); cursor: pointer; font-size: 12px;">
-                                <input type="checkbox" id="audioEnabledCheckbox" checked style="margin: 0;">
+                        <div class="settings-group">
+                            <h4>Audio Settings</h4>
+                            <div class="setting-item">
+                                <label for="audioEnabledCheckbox" class="checkbox-label">
+                                    <input type="checkbox" id="audioEnabledCheckbox" checked>
                                 <span>Enable Audio Recording</span>
                             </label>
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7; margin-left: 24px;">Capture system audio along with screen recording</span>
+                                <span class="setting-hint">Capture system audio along with screen recording</span>
                         </div>
 
-                        <!-- Audio Bitrate Control -->
-                        <div style="margin-bottom: 16px;">
-                            <label for="audioBitrateSelector" style="display: block; font-weight: 500; color: var(--text-color); font-size: 12px; margin-bottom: 8px;">
-                                Audio Bitrate Quality
-                            </label>
-                            <select id="audioBitrateSelector" style="width: 100%; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color); font-size: 12px;">
+                            <div class="setting-item">
+                                <label for="audioBitrateSelector">Audio Bitrate Quality:</label>
+                                <select id="audioBitrateSelector">
                                 <option value="64">64 kbps - Low Quality (Voice)</option>
                                 <option value="96">96 kbps - Good Quality (Voice)</option>
                                 <option value="128" selected>128 kbps - High Quality (Voice/Music)</option>
@@ -672,196 +1113,247 @@
                                 <option value="256">256 kbps - Premium Quality</option>
                                 <option value="320">320 kbps - Maximum Quality</option>
                             </select>
-                            <span style="font-size: 11px; color: var(--text-color); opacity: 0.7;">Higher bitrates = better quality but larger files. 128-192 kbps recommended for most use cases.</span>
+                                <span class="setting-hint">Higher bitrates = better quality but larger files. 128-192 kbps recommended for most use cases.</span>
                         </div>
 
-                        <!-- Audio Codec Information -->
-                        <div style="margin-bottom: 16px;">
-                            <div style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); font-size: 12px;">
-                                <div style="font-weight: 500; color: var(--text-color); margin-bottom: 4px;">
-                                    Audio Codec: <span id="audioCodecDisplay" style="color: #4CAF50;">Auto-selected</span>
+                            <div class="setting-item">
+                                <div class="audio-codec-info">
+                                    <div>Audio Codec: <span id="audioCodecDisplay">Auto-selected</span></div>
+                                    <div id="audioCodecInfo" class="setting-hint">Audio codec automatically selected (AAC for MP4, Opus for WebM)</div>
                                 </div>
-                                <div id="audioCodecInfo" style="font-size: 11px; color: var(--text-color); opacity: 0.7;">
-                                    Audio codec automatically selected (AAC for MP4, Opus for WebM)
                                 </div>
-                            </div>
-                        </div>
 
-                        <!-- Audio Processing Settings -->
-                        <div style="margin-bottom: 0;">
-                            <label style="display: block; font-weight: 500; color: var(--text-color); font-size: 12px; margin-bottom: 8px;">
-                                Audio Processing Settings
-                            </label>
-                            <div style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--section-bg); font-size: 12px;">
+                            <div class="setting-item">
+                                <label>Audio Processing Settings</label>
+                                <div class="audio-processing-controls">
+                                                                        <div class="processing-toggle">
+                                        <label for="autoGainControlToggle">Auto Gain Control</label>
+                                        <input type="checkbox" id="autoGainControlToggle">
+                                    </div>
+                                    <div class="setting-hint">Automatically adjusts audio levels (may compress dynamic range)</div>
+                                    
+                                    <div class="processing-toggle">
+                                        <label for="echoCancellationToggle">Echo Cancellation</label>
+                                        <input type="checkbox" id="echoCancellationToggle">
+                                    </div>
+                                    <div class="setting-hint">Removes echo and feedback (may affect frequency response)</div>
+                                    
+                                    <div class="processing-toggle">
+                                        <label for="noiseSuppressionToggle">Noise Suppression</label>
+                                        <input type="checkbox" id="noiseSuppressionToggle">
+                                    </div>
+                                    <div class="setting-hint">Reduces background noise (may affect audio quality)</div>
+                                </div>
+                                </div>
+                                </div>
+                    </div>
+                </details>
+
+                <!-- Recording Results Card -->
+                <div class="results-card">
+                    <h2>Recording Results</h2>
+                    <div id="results">
+                        <p>Start a recording to see results here.</p>
+                                </div>
+                </div>
+            </section>
+            <!-- RIGHT COLUMN: Diagnostics -->
+            <section class="diagnostics-panel">
+                <div class="diagnostics-header">
+                    <h2>System Diagnostics</h2>
+                    <div class="diagnostics-controls">
+                        <label for="fontSizeSlider">Font Size:</label>
+                        <input type="range" id="fontSizeSlider" min="8" max="14" value="12" step="1">
+                        <span id="fontSizeDisplay">12px</span>
+                    </div>
+                                </div>
                                 
-                                <!-- Auto Gain Control -->
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <label for="autoGainControlToggle" style="font-size: 11px; color: var(--text-color);">Auto Gain Control</label>
-                                    <input type="checkbox" id="autoGainControlToggle" checked style="transform: scale(0.9);">
+                <!-- Quick Look HUD - Always Visible -->
+                <div class="quick-look-hud">
+                    <h3>Quick Look</h3>
+                    <div class="hud-metrics">
+                        <div class="hud-metric">
+                            <span class="metric-label">CPU Pressure:</span>
+                            <span class="metric-value" id="hudCpuPressure">--</span>
                                 </div>
-                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 8px;">
-                                    Automatically adjusts audio levels (may compress dynamic range)
-                                </div>
-                                
-                                <!-- Echo Cancellation -->
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <label for="echoCancellationToggle" style="font-size: 11px; color: var(--text-color);">Echo Cancellation</label>
-                                    <input type="checkbox" id="echoCancellationToggle" checked style="transform: scale(0.9);">
-                                </div>
-                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 8px;">
-                                    Removes echo and feedback (may affect frequency response)
-                                </div>
-                                
-                                <!-- Noise Suppression -->
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <label for="noiseSuppressionToggle" style="font-size: 11px; color: var(--text-color);">Noise Suppression</label>
-                                    <input type="checkbox" id="noiseSuppressionToggle" checked style="transform: scale(0.9);">
-                                </div>
-                                <div style="font-size: 10px; color: var(--text-color); opacity: 0.6; margin-bottom: 4px;">
-                                    Reduces background noise (may remove quiet audio content)
-                                </div>
-                                
-                                <div style="font-size: 10px; color: #FF9800; opacity: 0.8; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color);">
-                                    💡 For highest quality: Disable all processing (unchecked = raw audio)
-                                </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Memory Usage:</span>
+                            <span class="metric-value" id="hudMemoryUsage">--</span>
                             </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Input FPS:</span>
+                            <span class="metric-value" id="hudInputFps">--</span>
                         </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Encoder Queue:</span>
+                            <span class="metric-value" id="hudEncoderQueue">--</span>
+                    </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Dropped Frames:</span>
+                            <span class="metric-value" id="hudDroppedFrames">--</span>
+                </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Active Codec:</span>
+                            <span class="metric-value" id="hudActiveCodec">--</span>
+            </div>
+                        <div class="hud-metric">
+                            <span class="metric-label">Hardware Accel:</span>
+                            <span class="metric-value" id="hudHardwareAccel">--</span>
                     </div>
                 </div>
+                    </div>
+                    
+                <!-- Collapsible Stats Groups -->
+                <div class="stats-accordion-container">
+                    <details class="stats-group" data-category="performance" open>
+                        <summary>Recording Performance</summary>
+                        <div class="stats-content">
+                            <div class="stats-subsection">
+                                <h5>Recording Stats</h5>
+                                <div class="stat-item">Input FPS: <span id="inputFps">--</span></div>
+                                <div class="stat-item">Encoder Queue: <span id="encoderQueue">--</span></div>
+                                <div class="stat-item">Output Bitrate: <span id="outputBitrate">--</span></div>
+                                <div class="stat-item">Dropped Frames: <span id="droppedFrames">--</span></div>
+                                <div class="stat-item">Encoding Latency: <span id="encodingLatency">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>Stream Quality</h5>
+                                <div class="stat-item">Actual Resolution: <span id="actualResolution">--</span></div>
+                                <div class="stat-item">Video Input: <span id="videoInput">--</span></div>
+                                <div class="stat-item">Audio Input: <span id="audioInput">--</span></div>
+                                <div class="stat-item">Compression Ratio: <span id="compressionRatio">--</span></div>
+                                <div class="stat-item">Keyframe Interval: <span id="keyframeInterval">--</span></div>
+                                <div class="stat-item">Bitrate Variance: <span id="bitrateVariance">--</span></div>
+                                <div class="stat-item">Quality Score: <span id="qualityScore">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>Recording Analysis</h5>
+                                <div class="stat-item">File Size: <span id="analysisFileSize">--</span></div>
+                                <div class="stat-item">Duration: <span id="analysisDuration">--</span></div>
+                                <div class="stat-item">Video Codec: <span id="analysisVideoCodec">--</span></div>
+                                <div class="stat-item">Video Resolution: <span id="analysisVideoResolution">--</span></div>
+                                <div class="stat-item">Video Bitrate: <span id="analysisVideoBitrate">--</span></div>
+                                <div class="stat-item">Audio Codec: <span id="analysisAudioCodec">--</span></div>
+                                <div class="stat-item">Audio Bitrate: <span id="analysisAudioBitrate">--</span></div>
+                                <div class="stat-item">Audio Channels: <span id="analysisAudioChannels">--</span></div>
+                                <div class="stat-item">Analysis Status: <span id="analysisStatus">--</span></div>
+                    </div>
+                    </div>
+                    </details>
+
+                    <details class="stats-group" data-category="audio">
+                        <summary>Audio Pipeline</summary>
+                        <div class="stats-content">
+                            <div class="stats-subsection">
+                                <h5>Source Audio Details</h5>
+                                <div class="stat-item">Sample Rate (Hz): <span id="sourceSampleRate">--</span></div>
+                                <div class="stat-item">Bit Depth (sampleSize): <span id="sourceBitDepth">--</span></div>
+                                <div class="stat-item">Channel Count: <span id="sourceChannelCount">--</span></div>
+                                <div class="stat-item">Latency: <span id="sourceLatency">--</span></div>
+                                <div class="stat-item">Auto Gain Control: <span id="sourceAutoGainControl">--</span></div>
+                                <div class="stat-item">Echo Cancellation: <span id="sourceEchoCancellation">--</span></div>
+                                <div class="stat-item">Noise Suppression: <span id="sourceNoiseSuppression">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>Recording Audio Details</h5>
+                                <div class="stat-item">Codec: <span id="recordingAudioCodec">--</span></div>
+                                <div class="stat-item">Sample Rate (Hz): <span id="recordingSampleRate">--</span></div>
+                                <div class="stat-item">Channel Count: <span id="recordingChannelCount">--</span></div>
+                                <div class="stat-item">Bitrate: <span id="recordingBitrate">--</span></div>
+                                <div class="stat-item">Processing Status: <span id="recordingAudioStatus">--</span></div>
+                    </div>
+                        </div>
+                    </details>
+
+                    <details class="stats-group" data-category="codec">
+                        <summary>Codec & GPU</summary>
+                        <div class="stats-content">
+                            <div class="stats-subsection">
+                                <h5>Codec Details</h5>
+                                <div class="stat-item">Active Codec: <span id="activeCodec">--</span></div>
+                                <div class="stat-item">Profile/Level: <span id="profileLevel">--</span></div>
+                                <div class="stat-item">Color Space: <span id="colorSpace">--</span></div>
+                                <div class="stat-item">Chroma Sampling: <span id="chromaSampling">--</span></div>
+                                <div class="stat-item">GOP Size: <span id="gopSize">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>Canvas & Encoding</h5>
+                                <div class="stat-item">Offscreen Canvas: <span id="offscreenCanvas">--</span></div>
+                                <div class="stat-item">Hardware Accel: <span id="hardwareAccel">--</span></div>
+                                <div class="stat-item">Encoder Type: <span id="encoderType">--</span></div>
+                                <div class="stat-item">Frame Uniformity: <span id="frameUniformity">--</span></div>
+                                <div class="stat-item">Scene Changes: <span id="sceneChanges">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>GPU Information</h5>
+                                <div class="stat-item">GPU Vendor: <span id="gpuVendor">--</span></div>
+                                <div class="stat-item">GPU Renderer: <span id="gpuRenderer">--</span></div>
+                                <div class="stat-item">GPU Memory: <span id="gpuMemory">--</span></div>
+                                <div class="stat-item">Max Texture Size: <span id="maxTextureSize">--</span></div>
+                                <div class="stat-item">Hardware Accel Status: <span id="hardwareAccelStatus">--</span></div>
+                                <div class="stat-item">WebGL Version: <span id="webglVersion">--</span></div>
+                    </div>
+                    
+                            <div class="stats-subsection">
+                                <h5>Codec Support</h5>
+                                <div class="stat-item">H.264 HW: <span id="h264Hardware">--</span></div>
+                                <div class="stat-item">H.264 SW: <span id="h264Software">--</span></div>
+                                <div class="stat-item">HEVC HW: <span id="hevcHardware">--</span></div>
+                                <div class="stat-item">HEVC SW: <span id="hevcSoftware">--</span></div>
+                                <div class="stat-item">VP9 HW: <span id="vp9Hardware">--</span></div>
+                                <div class="stat-item">VP9 SW: <span id="vp9Software">--</span></div>
+                                <div class="stat-item">AV1 HW: <span id="av1Hardware">--</span></div>
+                                <div class="stat-item">AV1 SW: <span id="av1Software">--</span></div>
+                    </div>
+                </div>
+                    </details>
+
+                    <details class="stats-group" data-category="system">
+                        <summary>System Health</summary>
+                        <div class="stats-content">
+                            <div class="stats-subsection">
+                                <h5>System Health</h5>
+                                <div class="stat-item">CPU Pressure: <span id="cpuPressure">--</span></div>
+                                <div class="stat-item">Memory Usage: <span id="memoryUsage">--</span></div>
+                                <div class="stat-item">Browser Storage: <span id="diskSpace">--</span></div>
+                                <div class="stat-item">Write Speed: <span id="writeSpeed">--</span></div>
+                                <div class="stat-item">Buffer Health: <span id="bufferHealth">--</span></div>
             </div>
             
-            <div class="section sidebar-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h2 style="margin: 0;">System Stats</h2>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <label for="fontSizeSlider" style="font-size: 11px; color: var(--text-color);">Font:</label>
-                        <input type="range" id="fontSizeSlider" min="8" max="14" value="12" step="1" style="width: 80px;">
-                        <span id="fontSizeDisplay" style="font-size: 10px; color: var(--text-color); min-width: 24px;">12px</span>
-                    </div>
-                </div>
-                <div id="stats" style="font-family: monospace; font-size: 12px; line-height: 1.2;">
-                    <div class="stats-section">
-                        <h4>Recording Stats</h4>
-                        <div>Input FPS: <span id="inputFps">--</span></div>
-                        <div>Encoder Queue: <span id="encoderQueue">--</span></div>
-                        <div>Output Bitrate: <span id="outputBitrate">--</span></div>
-                        <div>Dropped Frames: <span id="droppedFrames">--</span></div>
-                        <div>Encoding Latency: <span id="encodingLatency">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Stream Quality</h4>
-                        <div>Actual Resolution: <span id="actualResolution">--</span></div>
-                        <div>Video Input: <span id="videoInput">--</span></div>
-                        <div>Audio Input: <span id="audioInput">--</span></div>
-                        <div>Compression Ratio: <span id="compressionRatio">--</span></div>
-                        <div>Keyframe Interval: <span id="keyframeInterval">--</span></div>
-                        <div>Bitrate Variance: <span id="bitrateVariance">--</span></div>
-                        <div>Quality Score: <span id="qualityScore">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Source Audio Details</h4>
-                        <div>Sample Rate (Hz): <span id="sourceSampleRate">--</span></div>
-                        <div>Bit Depth (sampleSize): <span id="sourceBitDepth">--</span></div>
-                        <div>Channel Count: <span id="sourceChannelCount">--</span></div>
-                        <div>Latency: <span id="sourceLatency">--</span></div>
-                        <div>Auto Gain Control: <span id="sourceAutoGainControl">--</span></div>
-                        <div>Echo Cancellation: <span id="sourceEchoCancellation">--</span></div>
-                        <div>Noise Suppression: <span id="sourceNoiseSuppression">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Recording Audio Details</h4>
-                        <div>Codec: <span id="recordingAudioCodec">--</span></div>
-                        <div>Sample Rate (Hz): <span id="recordingSampleRate">--</span></div>
-                        <div>Channel Count: <span id="recordingChannelCount">--</span></div>
-                        <div>Bitrate: <span id="recordingBitrate">--</span></div>
-                        <div>Processing Status: <span id="recordingAudioStatus">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Recording Analysis</h4>
-                        <div>File Size: <span id="analysisFileSize">--</span></div>
-                        <div>Duration: <span id="analysisDuration">--</span></div>
-                        <div>Video Codec: <span id="analysisVideoCodec">--</span></div>
-                        <div>Video Resolution: <span id="analysisVideoResolution">--</span></div>
-                        <div>Video Bitrate: <span id="analysisVideoBitrate">--</span></div>
-                        <div>Audio Codec: <span id="analysisAudioCodec">--</span></div>
-                        <div>Audio Bitrate: <span id="analysisAudioBitrate">--</span></div>
-                        <div>Audio Channels: <span id="analysisAudioChannels">--</span></div>
-                        <div>Analysis Status: <span id="analysisStatus">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Codec Details</h4>
-                        <div>Active Codec: <span id="activeCodec">--</span></div>
-                        <div>Profile/Level: <span id="profileLevel">--</span></div>
-                        <div>Color Space: <span id="colorSpace">--</span></div>
-                        <div>Chroma Sampling: <span id="chromaSampling">--</span></div>
-                        <div>GOP Size: <span id="gopSize">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>System Health</h4>
-                        <div>CPU Pressure: <span id="cpuPressure">--</span></div>
-                        <div>Memory Usage: <span id="memoryUsage">--</span></div>
-                        <div>Browser Storage: <span id="diskSpace">--</span></div>
-                        <div>Write Speed: <span id="writeSpeed">--</span></div>
-                        <div>Buffer Health: <span id="bufferHealth">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Web Workers</h4>
-                        <div>Worker Status: <span id="workerStatus">--</span></div>
-                        <div>Message Queue: <span id="messageQueue">--</span></div>
-                        <div>Worker Errors: <span id="workerErrors">--</span></div>
-                        <div>Processing Speed: <span id="processingSpeed">--</span></div>
-                        <div>Memory Pool: <span id="memoryPool">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Canvas & Encoding</h4>
-                        <div>Offscreen Canvas: <span id="offscreenCanvas">--</span></div>
-                        <div>Hardware Accel: <span id="hardwareAccel">--</span></div>
-                        <div>Encoder Type: <span id="encoderType">--</span></div>
-                        <div>Frame Uniformity: <span id="frameUniformity">--</span></div>
-                        <div>Scene Changes: <span id="sceneChanges">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>GPU Information</h4>
-                        <div>GPU Vendor: <span id="gpuVendor">--</span></div>
-                        <div>GPU Renderer: <span id="gpuRenderer">--</span></div>
-                        <div>GPU Memory: <span id="gpuMemory">--</span></div>
-                        <div>Max Texture Size: <span id="maxTextureSize">--</span></div>
-                        <div>Encoder Model: <span id="encoderModel">--</span></div>
-                        <div>HW Acceleration: <span id="hardwareAccelStatus">--</span></div>
-                    </div>
-                    
-                    <div class="stats-section">
-                        <h4>Codec Support</h4>
-                        <div>H.264 HW: <span id="h264Hardware">--</span></div>
-                        <div>VP9 HW: <span id="vp9Hardware">--</span></div>
-                        <div>HEVC/H.265: <span id="hevcSupport">--</span></div>
-                        <div>AV1 Support: <span id="av1Support">--</span></div>
-                        <div>WebCodecs API: <span id="webcodecsApi">--</span></div>
-                        <div>MediaRecorder: <span id="mediaRecorderApi">--</span></div>
-                    </div>
+                            <div class="stats-subsection">
+                                <h5>Web Workers</h5>
+                                <div class="stat-item">Worker Status: <span id="workerStatus">--</span></div>
+                                <div class="stat-item">Message Queue: <span id="messageQueue">--</span></div>
+                                <div class="stat-item">Worker Errors: <span id="workerErrors">--</span></div>
+                                <div class="stat-item">Processing Speed: <span id="processingSpeed">--</span></div>
+                                <div class="stat-item">Memory Pool: <span id="memoryPool">--</span></div>
                 </div>
             </div>
-            
-            <div class="section results-section">
-                <h2>Recording Results</h2>
-                <div id="results">
-                    <p>Start a recording to see results here.</p>
-                </div>
-            </div>
+                    </details>
         </div>
+            </section>
+        </div>
+        
+
     </div></body>
 
     <script type="module">
         import { SlowTrackRecorder } from './src/index.ts';
+
+        // Workflow State Management
+        const WorkflowState = {
+            INITIAL: 'initial',
+            PREVIEWING: 'previewing', 
+            RECORDING: 'recording',
+            FINISHED: 'finished'
+        };
+
+        let currentState = WorkflowState.INITIAL;
 
         // Get DOM element references
         const openTabButton = document.getElementById('openTabButton');
@@ -871,6 +1363,174 @@
         const previewVideo = document.getElementById('preview');
         const resultsDiv = document.getElementById('results');
         const statusDiv = document.getElementById('status');
+
+        // New UI element references
+        const workflowStateSpan = document.getElementById('workflowState');
+        const recordingDurationSpan = document.getElementById('recordingDuration');
+        const fileSizeSpan = document.getElementById('fileSize');
+        const activeCodecStatusSpan = document.getElementById('activeCodecStatus');
+        const recordingOnlyElements = document.querySelectorAll('.recording-only');
+        const workflowSteps = document.querySelectorAll('.workflow-step');
+        const settingsAccordion = document.querySelector('.settings-accordion');
+
+        // HUD element references
+        const hudCpuPressure = document.getElementById('hudCpuPressure');
+        const hudMemoryUsage = document.getElementById('hudMemoryUsage');
+        const hudInputFps = document.getElementById('hudInputFps');
+        const hudEncoderQueue = document.getElementById('hudEncoderQueue');
+        const hudDroppedFrames = document.getElementById('hudDroppedFrames');
+        const hudActiveCodec = document.getElementById('hudActiveCodec');
+        const hudHardwareAccel = document.getElementById('hudHardwareAccel');
+
+        // Workflow State Management Functions
+        function updateWorkflowState(newState) {
+            document.body.setAttribute('data-workflow-state', newState);
+            currentState = newState;
+            workflowStateSpan.textContent = newState.charAt(0).toUpperCase() + newState.slice(1);
+            updateUIForState(newState);
+        }
+
+        function updateUIForState(state) {
+            // Update step states
+            workflowSteps.forEach(step => {
+                const stepNumber = parseInt(step.dataset.step);
+                step.dataset.state = 'disabled';
+            });
+
+            switch(state) {
+                case WorkflowState.INITIAL:
+                    // Show settings, enable step 1
+                    settingsAccordion.style.display = 'block';
+                    enableStep(1);
+                    updateStepStatus(1, 'Ready to start');
+                    hideRecordingElements();
+                    break;
+                    
+                case WorkflowState.PREVIEWING:
+                    // Keep settings visible, enable steps 2 and 3
+                    settingsAccordion.style.display = 'block';
+                    completeStep(1);
+                    enableStep(2);
+                    enableStep(3);
+                    updateStepStatus(2, 'Screen share active');
+                    updateStepStatus(3, 'Ready to record');
+                    hideRecordingElements();
+                    break;
+                    
+                case WorkflowState.RECORDING:
+                    // Hide settings, show only stop button
+                    settingsAccordion.style.display = 'none';
+                    completeStep(1);
+                    completeStep(2);
+                    completeStep(3);
+                    enableStep(4);
+                    updateStepStatus(4, 'Recording in progress...');
+                    showRecordingElements();
+                    break;
+                    
+                case WorkflowState.FINISHED:
+                    // Show results, re-enable settings for next test
+                    settingsAccordion.style.display = 'block';
+                    completeStep(1);
+                    completeStep(2);
+                    completeStep(3);
+                    completeStep(4);
+                    updateStepStatus(4, 'Recording completed');
+                    hideRecordingElements();
+                    break;
+            }
+        }
+
+        function enableStep(stepNumber) {
+            const step = document.querySelector(`[data-step="${stepNumber}"]`);
+            if (step) {
+                step.dataset.state = 'enabled';
+            }
+        }
+
+        function completeStep(stepNumber) {
+            const step = document.querySelector(`[data-step="${stepNumber}"]`);
+            if (step) {
+                step.dataset.state = 'completed';
+            }
+        }
+
+        function updateStepStatus(stepNumber, status) {
+            // Status text removed - function kept for compatibility
+            // Status information now communicated through:
+            // - Button tooltips
+            // - Button enabled/disabled state  
+            // - Workflow state in status bar
+            // - Color-coded step backgrounds
+        }
+
+        function showRecordingElements() {
+            recordingOnlyElements.forEach(el => el.style.display = 'flex');
+        }
+
+        function hideRecordingElements() {
+            recordingOnlyElements.forEach(el => el.style.display = 'none');
+        }
+
+        // Enhanced Stats Display with Color Coding
+        function enhanceStatsDisplay(statId, value, type) {
+            const span = document.getElementById(statId);
+            if (!span) return;
+            
+            // Clear existing classes
+            span.className = '';
+            span.textContent = value;
+            
+            // Apply color coding based on value type and thresholds
+            switch(type) {
+                case 'performance':
+                    const numValue = parseFloat(value);
+                    if (numValue >= 90) span.className = 'stat-excellent';
+                    else if (numValue >= 70) span.className = 'stat-good';
+                    else if (numValue >= 50) span.className = 'stat-warning';
+                    else span.className = 'stat-critical';
+                    break;
+                    
+                case 'boolean':
+                    if (value === 'Yes' || value === 'Enabled' || value === 'Active') {
+                        span.className = 'stat-enabled';
+                    } else if (value === 'No' || value === 'Disabled' || value === 'Inactive') {
+                        span.className = 'stat-disabled';
+                    }
+                    break;
+                    
+                case 'frames':
+                    const frameValue = parseInt(value);
+                    if (frameValue === 0) span.className = 'stat-excellent';
+                    else if (frameValue <= 5) span.className = 'stat-good';
+                    else if (frameValue <= 20) span.className = 'stat-warning';
+                    else span.className = 'stat-critical';
+                    break;
+
+                case 'pressure':
+                    if (value.includes('Low') || value.includes('Normal')) span.className = 'stat-excellent';
+                    else if (value.includes('Fair') || value.includes('Medium')) span.className = 'stat-warning';
+                    else if (value.includes('High') || value.includes('Critical')) span.className = 'stat-critical';
+                    break;
+            }
+        }
+
+        // Update HUD metrics (always visible critical stats)
+        function updateHUD() {
+            // Sync HUD with main stats
+            hudCpuPressure.textContent = document.getElementById('cpuPressure')?.textContent || '--';
+            hudMemoryUsage.textContent = document.getElementById('memoryUsage')?.textContent || '--';
+            hudInputFps.textContent = document.getElementById('inputFps')?.textContent || '--';
+            hudEncoderQueue.textContent = document.getElementById('encoderQueue')?.textContent || '--';
+            hudDroppedFrames.textContent = document.getElementById('droppedFrames')?.textContent || '--';
+            hudActiveCodec.textContent = document.getElementById('activeCodec')?.textContent || '--';
+            hudHardwareAccel.textContent = document.getElementById('hardwareAccel')?.textContent || '--';
+
+            // Apply color coding to HUD metrics
+            enhanceStatsDisplay('hudCpuPressure', hudCpuPressure.textContent, 'pressure');
+            enhanceStatsDisplay('hudDroppedFrames', hudDroppedFrames.textContent, 'frames');
+            enhanceStatsDisplay('hudHardwareAccel', hudHardwareAccel.textContent, 'boolean');
+        }
         const darkModeToggle = document.getElementById('darkModeToggle');
         const zoomInButton = document.getElementById('zoomInButton');
         const zoomOutButton = document.getElementById('zoomOutButton');
@@ -931,11 +1591,13 @@
         const frameUniformitySpan = document.getElementById('frameUniformity');
         const sceneChangesSpan = document.getElementById('sceneChanges');
         const h264HardwareSpan = document.getElementById('h264Hardware');
+        const h264SoftwareSpan = document.getElementById('h264Software');
         const vp9HardwareSpan = document.getElementById('vp9Hardware');
-        const hevcSupportSpan = document.getElementById('hevcSupport');
-        const av1SupportSpan = document.getElementById('av1Support');
-        const webcodecsApiSpan = document.getElementById('webcodecsApi');
-        const mediaRecorderApiSpan = document.getElementById('mediaRecorderApi');
+        const vp9SoftwareSpan = document.getElementById('vp9Software');
+        const hevcHardwareSpan = document.getElementById('hevcHardware');
+        const hevcSoftwareSpan = document.getElementById('hevcSoftware');
+        const av1HardwareSpan = document.getElementById('av1Hardware');
+        const av1SoftwareSpan = document.getElementById('av1Software');
 
         // State variables
         let recorder = null;
@@ -1612,49 +2274,73 @@
         // Update codec support stats display
         function updateCodecSupportStats() {
             if (!videoStats.codecSupport) {
-                h264HardwareSpan.textContent = 'Detecting...';
-                vp9HardwareSpan.textContent = 'Detecting...';
-                hevcSupportSpan.textContent = 'Detecting...';
-                av1SupportSpan.textContent = 'Detecting...';
-                webcodecsApiSpan.textContent = 'Detecting...';
-                mediaRecorderApiSpan.textContent = 'Detecting...';
+                // Set detecting status with null checks
+                if (h264HardwareSpan) h264HardwareSpan.textContent = 'Detecting...';
+                if (h264SoftwareSpan) h264SoftwareSpan.textContent = 'Detecting...';
+                if (vp9HardwareSpan) vp9HardwareSpan.textContent = 'Detecting...';
+                if (vp9SoftwareSpan) vp9SoftwareSpan.textContent = 'Detecting...';
+                if (hevcHardwareSpan) hevcHardwareSpan.textContent = 'Detecting...';
+                if (hevcSoftwareSpan) hevcSoftwareSpan.textContent = 'Detecting...';
+                if (av1HardwareSpan) av1HardwareSpan.textContent = 'Detecting...';
+                if (av1SoftwareSpan) av1SoftwareSpan.textContent = 'Detecting...';
                 return;
             }
 
             if (videoStats.codecSupport.error) {
-                h264HardwareSpan.textContent = 'Error';
-                vp9HardwareSpan.textContent = 'Error';
-                hevcSupportSpan.textContent = 'Error';
-                av1SupportSpan.textContent = 'Error';
-                webcodecsApiSpan.textContent = 'Error';
-                mediaRecorderApiSpan.textContent = 'Error';
+                // Set error status with null checks
+                if (h264HardwareSpan) h264HardwareSpan.textContent = 'Error';
+                if (h264SoftwareSpan) h264SoftwareSpan.textContent = 'Error';
+                if (vp9HardwareSpan) vp9HardwareSpan.textContent = 'Error';
+                if (vp9SoftwareSpan) vp9SoftwareSpan.textContent = 'Error';
+                if (hevcHardwareSpan) hevcHardwareSpan.textContent = 'Error';
+                if (hevcSoftwareSpan) hevcSoftwareSpan.textContent = 'Error';
+                if (av1HardwareSpan) av1HardwareSpan.textContent = 'Error';
+                if (av1SoftwareSpan) av1SoftwareSpan.textContent = 'Error';
                 return;
             }
 
-            // H.264 Hardware
-            h264HardwareSpan.textContent = videoStats.codecSupport.h264Hardware ? '✅ Available' : '❌ Software only';
-            h264HardwareSpan.style.color = videoStats.codecSupport.h264Hardware ? '#4CAF50' : '#FF9800';
+            // Update H.264 support display with null checks
+            if (h264HardwareSpan) {
+                h264HardwareSpan.textContent = videoStats.codecSupport.h264Hardware ? '✅ Available' : '❌ Not Available';
+                h264HardwareSpan.style.color = videoStats.codecSupport.h264Hardware ? '#4CAF50' : '#F44336';
+            }
+            if (h264SoftwareSpan) {
+                h264SoftwareSpan.textContent = '✅ Available'; // H.264 software is always available
+                h264SoftwareSpan.style.color = '#4CAF50';
+            }
 
-            // VP9 Hardware
-            vp9HardwareSpan.textContent = videoStats.codecSupport.vp9Hardware ? '✅ Available' : '❌ Software only';
-            vp9HardwareSpan.style.color = videoStats.codecSupport.vp9Hardware ? '#4CAF50' : '#FF9800';
+            // Update VP9 support display with null checks
+            if (vp9HardwareSpan) {
+                vp9HardwareSpan.textContent = videoStats.codecSupport.vp9Hardware ? '✅ Available' : '❌ Not Available';
+                vp9HardwareSpan.style.color = videoStats.codecSupport.vp9Hardware ? '#4CAF50' : '#F44336';
+            }
+            if (vp9SoftwareSpan) {
+                vp9SoftwareSpan.textContent = '✅ Available'; // VP9 software is generally available
+                vp9SoftwareSpan.style.color = '#4CAF50';
+            }
 
-            // HEVC/H.265 Support
-            hevcSupportSpan.textContent = videoStats.codecSupport.hevcSupport ? '✅ Available' : '❌ Not available';
-            hevcSupportSpan.style.color = videoStats.codecSupport.hevcSupport ? '#4CAF50' : '#F44336';
+            // Update HEVC support display with null checks
+            if (hevcHardwareSpan) {
+                hevcHardwareSpan.textContent = videoStats.codecSupport.hevcSupport ? '✅ Available' : '❌ Not Available';
+                hevcHardwareSpan.style.color = videoStats.codecSupport.hevcSupport ? '#4CAF50' : '#F44336';
+            }
+            if (hevcSoftwareSpan) {
+                hevcSoftwareSpan.textContent = videoStats.codecSupport.hevcSupport ? '✅ Available' : '❌ Not Available';
+                hevcSoftwareSpan.style.color = videoStats.codecSupport.hevcSupport ? '#4CAF50' : '#F44336';
+            }
 
-            // AV1 Support
-            av1SupportSpan.textContent = videoStats.codecSupport.av1Support ? '✅ Supported' : '❌ Not available';
-            av1SupportSpan.style.color = videoStats.codecSupport.av1Support ? '#4CAF50' : '#F44336';
+            // Update AV1 support display with null checks
+            if (av1HardwareSpan) {
+                av1HardwareSpan.textContent = videoStats.codecSupport.av1Support ? '✅ Available' : '❌ Not Available';
+                av1HardwareSpan.style.color = videoStats.codecSupport.av1Support ? '#4CAF50' : '#F44336';
+            }
+            if (av1SoftwareSpan) {
+                av1SoftwareSpan.textContent = videoStats.codecSupport.av1Support ? '✅ Available' : '❌ Not Available';
+                av1SoftwareSpan.style.color = videoStats.codecSupport.av1Support ? '#4CAF50' : '#F44336';
+            }
 
-            // WebCodecs API
-            webcodecsApiSpan.textContent = videoStats.codecSupport.webcodecs ? '✅ Available' : '❌ Not supported';
-            webcodecsApiSpan.style.color = videoStats.codecSupport.webcodecs ? '#4CAF50' : '#F44336';
-
-            // MediaRecorder API
-            const mrSupported = videoStats.codecSupport.mediaRecorder && videoStats.codecSupport.supportedTypes.length > 0;
-            mediaRecorderApiSpan.textContent = mrSupported ? `✅ ${videoStats.codecSupport.supportedTypes.length} codecs` : '❌ Limited support';
-            mediaRecorderApiSpan.style.color = mrSupported ? '#4CAF50' : '#FF9800';
+            // WebCodecs API and MediaRecorder API elements don't exist in new layout
+            // These were part of the old stats structure that was reorganized
         }
 
         // Detect hardware acceleration status
@@ -1742,78 +2428,88 @@
         // Update GPU stats display
         function updateGPUStats() {
             if (!gpuInfo) {
-                gpuVendorSpan.textContent = 'Detecting...';
-                gpuRendererSpan.textContent = 'Detecting...';
-                gpuMemorySpan.textContent = 'Detecting...';
-                maxTextureSizeSpan.textContent = 'Detecting...';
-                hardwareAccelStatusSpan.textContent = 'Detecting...';
+                // Set detecting status with null checks
+                if (gpuVendorSpan) gpuVendorSpan.textContent = 'Detecting...';
+                if (gpuRendererSpan) gpuRendererSpan.textContent = 'Detecting...';
+                if (gpuMemorySpan) gpuMemorySpan.textContent = 'Detecting...';
+                if (maxTextureSizeSpan) maxTextureSizeSpan.textContent = 'Detecting...';
+                if (hardwareAccelStatusSpan) hardwareAccelStatusSpan.textContent = 'Detecting...';
                 return;
             }
 
             if (gpuInfo.error) {
-                gpuVendorSpan.textContent = 'Error';
-                gpuRendererSpan.textContent = 'Error';
-                gpuMemorySpan.textContent = 'Error';
-                maxTextureSizeSpan.textContent = 'Error';
-                hardwareAccelStatusSpan.textContent = 'Error';
+                // Set error status with null checks
+                if (gpuVendorSpan) gpuVendorSpan.textContent = 'Error';
+                if (gpuRendererSpan) gpuRendererSpan.textContent = 'Error';
+                if (gpuMemorySpan) gpuMemorySpan.textContent = 'Error';
+                if (maxTextureSizeSpan) maxTextureSizeSpan.textContent = 'Error';
+                if (hardwareAccelStatusSpan) hardwareAccelStatusSpan.textContent = 'Error';
                 return;
             }
 
-            // GPU Vendor
-            gpuVendorSpan.textContent = gpuInfo.vendor;
-            if (gpuInfo.vendor.toLowerCase().includes('nvidia')) {
-                gpuVendorSpan.style.color = '#76B900'; // NVIDIA green
-            } else if (gpuInfo.vendor.toLowerCase().includes('amd')) {
-                gpuVendorSpan.style.color = '#ED1C24'; // AMD red
-            } else if (gpuInfo.vendor.toLowerCase().includes('intel')) {
-                gpuVendorSpan.style.color = '#0071C5'; // Intel blue
-            } else {
-                gpuVendorSpan.style.color = 'var(--text-color)';
-            }
-
-            // GPU Renderer - truncate if too long
-            let rendererText = gpuInfo.renderer;
-            if (rendererText.length > 30) {
-                rendererText = rendererText.substring(0, 27) + '...';
-            }
-            gpuRendererSpan.textContent = rendererText;
-            gpuRendererSpan.title = gpuInfo.renderer; // Full text on hover
-
-            // GPU Memory
-            if (gpuInfo.memoryInfo) {
-                const totalMB = Math.round(gpuInfo.memoryInfo.totalBytes / (1024 * 1024));
-                const usedMB = Math.round((gpuInfo.memoryInfo.totalBytes - gpuInfo.memoryInfo.usedBytes) / (1024 * 1024));
-                const percentage = Math.round((usedMB / totalMB) * 100);
-                gpuMemorySpan.textContent = `${usedMB}/${totalMB} MB (${percentage}%)`;
-                
-                if (percentage > 80) {
-                    gpuMemorySpan.style.color = '#F44336'; // High usage - red
-                } else if (percentage > 60) {
-                    gpuMemorySpan.style.color = '#FF9800'; // Medium usage - orange
+            // GPU Vendor with null check
+            if (gpuVendorSpan) {
+                gpuVendorSpan.textContent = gpuInfo.vendor || 'Unknown';
+                if (gpuInfo.vendor && gpuInfo.vendor.toLowerCase().includes('nvidia')) {
+                    gpuVendorSpan.style.color = '#76B900'; // NVIDIA green
+                } else if (gpuInfo.vendor && gpuInfo.vendor.toLowerCase().includes('amd')) {
+                    gpuVendorSpan.style.color = '#ED1C24'; // AMD red
+                } else if (gpuInfo.vendor && gpuInfo.vendor.toLowerCase().includes('intel')) {
+                    gpuVendorSpan.style.color = '#0071C5'; // Intel blue
                 } else {
-                    gpuMemorySpan.style.color = '#4CAF50'; // Low usage - green
+                    gpuVendorSpan.style.color = 'var(--text-color)';
                 }
-            } else {
-                gpuMemorySpan.textContent = 'Not available';
-                gpuMemorySpan.style.color = '#666';
             }
 
-            // Max Texture Size
-            if (gpuInfo.maxTextureSize && gpuInfo.maxTextureSize !== 'Unknown') {
-                maxTextureSizeSpan.textContent = `${gpuInfo.maxTextureSize}px`;
-                
-                // Color code based on capability
-                const size = parseInt(gpuInfo.maxTextureSize);
-                if (size >= 16384) {
-                    maxTextureSizeSpan.style.color = '#4CAF50'; // Excellent
-                } else if (size >= 8192) {
-                    maxTextureSizeSpan.style.color = '#FF9800'; // Good
-                } else {
-                    maxTextureSizeSpan.style.color = '#F44336'; // Limited
+            // GPU Renderer - truncate if too long with null check
+            if (gpuRendererSpan) {
+                let rendererText = gpuInfo.renderer || 'Unknown';
+                if (rendererText.length > 30) {
+                    rendererText = rendererText.substring(0, 27) + '...';
                 }
-            } else {
-                maxTextureSizeSpan.textContent = 'Unknown';
-                maxTextureSizeSpan.style.color = '#666';
+                gpuRendererSpan.textContent = rendererText;
+                gpuRendererSpan.title = gpuInfo.renderer || 'Unknown'; // Full text on hover
+            }
+
+            // GPU Memory with null check
+            if (gpuMemorySpan) {
+                if (gpuInfo.memoryInfo) {
+                    const totalMB = Math.round(gpuInfo.memoryInfo.totalBytes / (1024 * 1024));
+                    const usedMB = Math.round((gpuInfo.memoryInfo.totalBytes - gpuInfo.memoryInfo.usedBytes) / (1024 * 1024));
+                    const percentage = Math.round((usedMB / totalMB) * 100);
+                    gpuMemorySpan.textContent = `${usedMB}/${totalMB} MB (${percentage}%)`;
+                    
+                    if (percentage > 80) {
+                        gpuMemorySpan.style.color = '#F44336'; // High usage - red
+                    } else if (percentage > 60) {
+                        gpuMemorySpan.style.color = '#FF9800'; // Medium usage - orange
+                    } else {
+                        gpuMemorySpan.style.color = '#4CAF50'; // Low usage - green
+                    }
+                } else {
+                    gpuMemorySpan.textContent = 'Not available';
+                    gpuMemorySpan.style.color = '#666';
+                }
+            }
+
+            // Max Texture Size with null check
+            if (maxTextureSizeSpan) {
+                if (gpuInfo.maxTextureSize && gpuInfo.maxTextureSize !== 'Unknown') {
+                    maxTextureSizeSpan.textContent = `${gpuInfo.maxTextureSize}px`;
+                
+                    // Color code based on capability
+                    const size = parseInt(gpuInfo.maxTextureSize);
+                    if (size >= 16384) {
+                        maxTextureSizeSpan.style.color = '#4CAF50'; // Excellent
+                    } else if (size >= 8192) {
+                        maxTextureSizeSpan.style.color = '#FF9800'; // Good
+                    } else {
+                        maxTextureSizeSpan.style.color = '#F44336'; // Limited
+                    }
+                } else {
+                    maxTextureSizeSpan.textContent = 'Unknown';
+                    maxTextureSizeSpan.style.color = '#666';
+                }
             }
 
             // Encoder Model
@@ -1829,13 +2525,14 @@
                     encoderModel = 'VideoToolbox';
                 }
             }
-            encoderModelSpan.textContent = encoderModel;
+            if (encoderModelSpan) encoderModelSpan.textContent = encoderModel;
 
-            // Hardware Acceleration Status
-            if (gpuInfo.hardwareAccelerationStatus) {
-                if (gpuInfo.hardwareAccelerationStatus.error) {
-                    hardwareAccelStatusSpan.textContent = 'Detection Error';
-                    hardwareAccelStatusSpan.style.color = '#F44336';
+            // Hardware Acceleration Status with null check
+            if (hardwareAccelStatusSpan) {
+                if (gpuInfo.hardwareAccelerationStatus) {
+                    if (gpuInfo.hardwareAccelerationStatus.error) {
+                        hardwareAccelStatusSpan.textContent = 'Detection Error';
+                        hardwareAccelStatusSpan.style.color = '#F44336';
                 } else {
                     const status = gpuInfo.hardwareAccelerationStatus;
                     
@@ -1862,8 +2559,9 @@
                         hardwareAccelStatusSpan.textContent += ' (Low Confidence)';
                     }
                 }
-            } else {
-                hardwareAccelStatusSpan.textContent = 'Detecting...';
+                } else {
+                    hardwareAccelStatusSpan.textContent = 'Detecting...';
+                }
             }
         }
 
@@ -1876,7 +2574,10 @@
                     const usedMB = Math.round(memory.usedJSHeapSize / (1024 * 1024));
                     const totalMB = Math.round(memory.totalJSHeapSize / (1024 * 1024));
                     const percentage = Math.round((memory.usedJSHeapSize / memory.totalJSHeapSize) * 100);
-                    memoryUsageSpan.textContent = `${usedMB} MB (${percentage}%)`;
+                    const memoryText = `${usedMB} MB (${percentage}%)`;
+                    memoryUsageSpan.textContent = memoryText;
+                    // Apply color coding based on percentage
+                    enhanceStatsDisplay('memoryUsage', percentage.toString(), 'performance');
                 } else {
                     memoryUsageSpan.textContent = 'N/A';
                 }
@@ -1887,17 +2588,28 @@
                     inputFpsSpan.textContent = '30'; // Will be dynamic
                     encoderQueueSpan.textContent = '0'; // Will be from worker
                     outputBitrateSpan.textContent = '2500 kbps'; // Will be calculated
+                    droppedFramesSpan.textContent = '0'; // Will be from worker
                 } else {
                     inputFpsSpan.textContent = '--';
                     encoderQueueSpan.textContent = '--';
                     outputBitrateSpan.textContent = '--';
+                    droppedFramesSpan.textContent = '--';
                 }
+
+                // Apply color coding to key performance metrics
+                enhanceStatsDisplay('droppedFrames', droppedFramesSpan.textContent, 'frames');
+                enhanceStatsDisplay('hardwareAccel', hardwareAccelSpan.textContent, 'boolean');
+                enhanceStatsDisplay('workerStatus', workerStatusSpan.textContent, 'boolean');
 
                 // Update worker stats
                 updateWorkerStats();
 
                 // Update advanced video stats (performance-safe)
                 updateAdvancedVideoStats();
+
+                // Update HUD with latest values
+                updateHUD();
+                
             } catch (error) {
                 console.warn('Stats update failed:', error);
             }
@@ -2138,42 +2850,52 @@
 
         // Update codec display in the stats (when actually recording)
         function updateCodecDisplay(codec) {
+            let codecDisplayText = '';
+            
             if (codec === 'av1') {
-                activeCodecSpan.textContent = 'AV1 (Recording)';
+                codecDisplayText = 'AV1 (Recording)';
+                activeCodecSpan.textContent = codecDisplayText;
                 activeCodecSpan.style.color = '#2196F3'; // Blue for next-gen codec
                 profileLevelSpan.textContent = 'Main Profile L4.0';
                 colorSpaceSpan.textContent = 'BT.709';
                 chromaSamplingSpan.textContent = '4:2:0';
                 gopSizeSpan.textContent = '60 frames';
             } else if (codec === 'hevc') {
-                activeCodecSpan.textContent = 'HEVC (Recording)';
+                codecDisplayText = 'HEVC (Recording)';
+                activeCodecSpan.textContent = codecDisplayText;
                 activeCodecSpan.style.color = '#9C27B0'; // Purple for premium codec
                 profileLevelSpan.textContent = 'Main Profile L3.1';
                 colorSpaceSpan.textContent = 'BT.709';
                 chromaSamplingSpan.textContent = '4:2:0';
                 gopSizeSpan.textContent = '60 frames';
             } else if (codec === 'h264') {
-                activeCodecSpan.textContent = 'H.264 (Recording)';
+                codecDisplayText = 'H.264 (Recording)';
+                activeCodecSpan.textContent = codecDisplayText;
                 activeCodecSpan.style.color = '#4CAF50'; // Green for primary codec
                 profileLevelSpan.textContent = 'Baseline L3.1';
                 colorSpaceSpan.textContent = 'BT.709';
                 chromaSamplingSpan.textContent = '4:2:0';
                 gopSizeSpan.textContent = '60 frames';
             } else if (codec === 'vp9') {
-                activeCodecSpan.textContent = 'VP9 (Recording)';
+                codecDisplayText = 'VP9 (Recording)';
+                activeCodecSpan.textContent = codecDisplayText;
                 activeCodecSpan.style.color = '#FF9800'; // Orange for fallback codec
                 profileLevelSpan.textContent = 'Profile 0';
                 colorSpaceSpan.textContent = 'BT.709';
                 chromaSamplingSpan.textContent = '4:2:0';
                 gopSizeSpan.textContent = '60 frames';
             } else {
-                activeCodecSpan.textContent = 'Unknown';
+                codecDisplayText = 'Unknown';
+                activeCodecSpan.textContent = codecDisplayText;
                 activeCodecSpan.style.color = '#F44336'; // Red for error
                 profileLevelSpan.textContent = 'Unknown';
                 colorSpaceSpan.textContent = 'Unknown';
                 chromaSamplingSpan.textContent = 'Unknown';
                 gopSizeSpan.textContent = 'Unknown';
             }
+            
+            // Update status bar codec display
+            activeCodecStatusSpan.textContent = codecDisplayText;
         }
 
         // Update codec details based on hardware acceleration detection results
@@ -2247,19 +2969,25 @@
 
         function startRecordingTimer() {
             recordingStartTime = Date.now();
-            recordTimeChip.classList.add('recording');
+            // recordTimeChip no longer exists - using new status bar instead
             
             recordingTimer = setInterval(() => {
                 const elapsedSeconds = Math.floor((Date.now() - recordingStartTime) / 1000);
-                timeDisplay.textContent = formatTime(elapsedSeconds);
+                const formattedTime = formatTime(elapsedSeconds);
+                
+                // Update old chip display (with null check)
+                if (timeDisplay) timeDisplay.textContent = formattedTime;
+                
+                // Update new status bar
+                if (recordingDurationSpan) recordingDurationSpan.textContent = formattedTime;
                 
                 // Calculate estimated file size based on bitrate and elapsed time
                 updateFileSizeEstimate(elapsedSeconds);
             }, 1000);
             
             // Update immediately
-            timeDisplay.textContent = '00:00';
-            sizeDisplay.textContent = '0 MB';
+            if (timeDisplay) timeDisplay.textContent = '00:00';
+            if (sizeDisplay) sizeDisplay.textContent = '0 MB';
         }
 
         function stopRecordingTimer() {
@@ -2268,15 +2996,17 @@
                 recordingTimer = null;
             }
             
-            recordTimeChip.classList.remove('recording');
+            // recordTimeChip no longer exists - using new status bar instead
             recordingStartTime = null;
-            timeDisplay.textContent = '00:00';
-            sizeDisplay.textContent = '0 MB';
+            if (timeDisplay) timeDisplay.textContent = '00:00';
+            if (sizeDisplay) sizeDisplay.textContent = '0 MB';
         }
 
         function updateFileSizeEstimate(elapsedSeconds) {
             if (elapsedSeconds === 0) {
-                sizeDisplay.textContent = '0 MB';
+                const sizeText = '0 MB';
+                if (sizeDisplay) sizeDisplay.textContent = sizeText;
+                if (fileSizeSpan) fileSizeSpan.textContent = sizeText;
                 return;
             }
             
@@ -2309,15 +3039,20 @@
             const estimatedMB = estimatedBytes / (1024 * 1024);
             
             // Format the display
+            let sizeText;
             if (estimatedMB < 1) {
                 const estimatedKB = estimatedBytes / 1024;
-                sizeDisplay.textContent = `${estimatedKB.toFixed(0)} KB`;
+                sizeText = `${estimatedKB.toFixed(0)} KB`;
             } else if (estimatedMB < 1000) {
-                sizeDisplay.textContent = `${estimatedMB.toFixed(1)} MB`;
+                sizeText = `${estimatedMB.toFixed(1)} MB`;
             } else {
                 const estimatedGB = estimatedMB / 1024;
-                sizeDisplay.textContent = `${estimatedGB.toFixed(2)} GB`;
+                sizeText = `${estimatedGB.toFixed(2)} GB`;
             }
+            
+            // Update both old chip and new status bar (with null checks)
+            if (sizeDisplay) sizeDisplay.textContent = sizeText;
+            if (fileSizeSpan) fileSizeSpan.textContent = sizeText;
         }
 
         // Zoom functionality
@@ -2363,19 +3098,22 @@
             const lineHeight = Math.max(1.1, 1.0 + (fontSize - 8) * 0.05); // Dynamic line height
             const headingSize = Math.max(fontSize, fontSize + 1); // Headings slightly larger
             
-            // Update main stats container
-            statsContainer.style.fontSize = `${fontSize}px`;
-            statsContainer.style.lineHeight = lineHeight.toString();
+            // Update new stats containers (stat-item elements) - statsContainer no longer exists
+            const statItems = document.querySelectorAll('.stat-item');
+            statItems.forEach(item => {
+                item.style.fontSize = `${fontSize}px`;
+                item.style.lineHeight = lineHeight.toString();
+            });
             
             // Override CSS rules for stats sections
             const style = document.getElementById('dynamicStatsStyle') || document.createElement('style');
             style.id = 'dynamicStatsStyle';
             style.textContent = `
-                .stats-section div {
+                .stat-item {
                     font-size: ${fontSize}px !important;
                     line-height: ${lineHeight} !important;
                 }
-                .stats-section h4 {
+                .stats-subsection h5 {
                     font-size: ${headingSize}px !important;
                     line-height: ${lineHeight} !important;
                 }
@@ -2425,6 +3163,7 @@
         // Screenshare button click handler
         screenshareButton.addEventListener('click', async () => {
             try {
+                updateWorkflowState(WorkflowState.PREVIEWING);
                 showStatus('Requesting screen capture...', 'info');
                 
                 // Get frame rate preference and audio setting for screen capture
@@ -2635,6 +3374,8 @@
                     showStatus('No screen capture available. Start screen share first.', 'error');
                     return;
                 }
+                
+                updateWorkflowState(WorkflowState.RECORDING);
 
                 showStatus('Starting recording...', 'info');
                 
@@ -3014,6 +3755,7 @@
         // Stop button click handler
         stopButton.addEventListener('click', async () => {
             try {
+                updateWorkflowState(WorkflowState.FINISHED);
                 showStatus('Stopping recording...', 'info');
                 
                 // Stop recording and get blob
