@@ -88,6 +88,15 @@ export class SlowTrackRecorder {
   /** Minimal diagnostic counters */
   #videoFrameCount = 0;
   #lastDiagnosticTime = 0;
+  
+  /** Track pending normalized frames to ensure cleanup */
+  #pendingNormalizedFrames = new Set<VideoFrame>();
+  
+  /** Track original frames from MediaStreamTrackProcessor */
+  #pendingOriginalFrames = new Set<VideoFrame>();
+  
+  /** Track original audio frames from MediaStreamTrackProcessor */
+  #pendingOriginalAudioFrames = new Set<AudioData>();
 
 
 
@@ -488,6 +497,52 @@ export class SlowTrackRecorder {
     // Signal processing loops to terminate gracefully first
     this.#shouldStopProcessing = true;
     
+    // Clean up any pending normalized frames that haven't been processed
+    console.log(`SlowTrackRecorder: Cleaning up ${this.#pendingNormalizedFrames.size} pending normalized frames, ${this.#pendingOriginalFrames.size} original video frames, and ${this.#pendingOriginalAudioFrames.size} original audio frames`);
+    
+    for (const frame of this.#pendingNormalizedFrames) {
+      try {
+        frame.close();
+      } catch (closeError) {
+        // Frame might have been closed already, ignore
+      }
+    }
+    this.#pendingNormalizedFrames.clear();
+    
+    // Clean up any pending original video frames
+    for (const frame of this.#pendingOriginalFrames) {
+      try {
+        frame.close();
+      } catch (closeError) {
+        // Frame might have been closed already, ignore
+      }
+    }
+    this.#pendingOriginalFrames.clear();
+    
+    // Clean up any pending original audio frames
+    for (const frame of this.#pendingOriginalAudioFrames) {
+      try {
+        frame.close();
+      } catch (closeError) {
+        // Frame might have been closed already, ignore
+      }
+    }
+    this.#pendingOriginalAudioFrames.clear();
+    
+    // Additional cleanup: Force garbage collection after a short delay
+    setTimeout(() => {
+      try {
+        // @ts-ignore - gc() is available in Node.js with --expose-gc flag
+        if (typeof gc !== 'undefined') {
+          // @ts-ignore
+          gc();
+          console.log('SlowTrackRecorder: Forced garbage collection after cleanup');
+        }
+      } catch (gcError) {
+        // gc() not available, ignore
+      }
+    }, 100);
+    
     // Idempotency Check: Prevent multiple stop calls
     if (!this.#isRecording) {
       throw new Error('Recording is not currently active');
@@ -620,10 +675,20 @@ export class SlowTrackRecorder {
           break; // The stream has ended.
         }
 
+        // Track the original frame to ensure cleanup
+        if (frame) {
+          this.#pendingOriginalFrames.add(frame);
+        }
+
         // We wrap the processing of each frame to ensure the original is always closed.
         try {
           this.#videoFrameCount++;
           const now = performance.now();
+          
+          // Debug: Log frame details for leak investigation
+          if (this.#videoFrameCount % 20 === 0) {
+            console.log(`SlowTrackRecorder: Processing frame ${this.#videoFrameCount}, pending: ${this.#pendingNormalizedFrames.size}`);
+          }
           
           // Log every 5 seconds to diagnose frame rate
           if (now - this.#lastDiagnosticTime > 5000) {
@@ -645,17 +710,35 @@ export class SlowTrackRecorder {
             duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
           });
 
+          // Track this frame to ensure cleanup
+          this.#pendingNormalizedFrames.add(normalizedFrame);
+
           // Forward the newly timestamped frame to the worker.
-          // Use non-blocking write to prevent main thread stalls
-          writer.write(normalizedFrame).catch(writeError => {
-            console.warn('SlowTrackRecorder: Video frame write failed (expected during high load):', writeError instanceof Error ? writeError.message : String(writeError));
-            // Don't throw - let the worker handle backpressure
+          // Use fire-and-forget write with proper error handling
+          const frameId = this.#videoFrameCount; // Track frame for debugging
+          writer.write(normalizedFrame).then(() => {
+            // Frame successfully queued - worker will handle closing it
+            if (frameId % 50 === 0) {
+              console.log(`SlowTrackRecorder: Frame ${frameId} successfully queued to worker`);
+            }
+          }).catch(writeError => {
+            console.warn(`SlowTrackRecorder: Video frame ${frameId} write failed (expected during high load):`, writeError instanceof Error ? writeError.message : String(writeError));
+            // Clean up the normalized frame if write failed
+            try {
+              normalizedFrame.close();
+              this.#pendingNormalizedFrames.delete(normalizedFrame);
+              console.log(`SlowTrackRecorder: Closed failed frame ${frameId}`);
+            } catch (closeError) {
+              // Frame might have been closed already, ignore
+            }
           });
 
         } finally {
           // CRITICAL: Close the original frame to release its underlying memory,
           // even if the processing logic above throws an error.
           frame.close();
+          // Remove from tracking
+          this.#pendingOriginalFrames.delete(frame);
         }
       }
     } catch (error) {
@@ -713,6 +796,11 @@ export class SlowTrackRecorder {
           break; // The stream has ended.
         }
 
+        // Track the original audio frame to ensure cleanup
+        if (frame) {
+          this.#pendingOriginalAudioFrames.add(frame);
+        }
+
         // We wrap the processing of each frame to ensure the original is always closed.
         try {
           // On the very first frame, capture its timestamp as the baseline for this track.
@@ -765,6 +853,8 @@ export class SlowTrackRecorder {
           // CRITICAL: Close the original frame to release its underlying memory,
           // even if the processing logic above throws an error.
           frame.close();
+          // Remove from tracking
+          this.#pendingOriginalAudioFrames.delete(frame);
         }
       }
     } catch (error) {

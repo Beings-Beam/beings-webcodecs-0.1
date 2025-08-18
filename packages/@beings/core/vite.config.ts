@@ -15,7 +15,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
-    plugins: []
+    plugins: () => []
   },
   optimizeDeps: {
     exclude: ['mp4-muxer', 'webm-muxer']

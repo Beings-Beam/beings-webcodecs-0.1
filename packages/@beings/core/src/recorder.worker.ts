@@ -55,6 +55,10 @@ let videoFramesProcessed = 0;
 let audioFramesProcessed = 0;
 let videoFramesDropped = 0;
 
+// Time-based sync tracking (more accurate than frame counting)
+let totalVideoTimeProcessed = 0; // Total video time in milliseconds
+let totalAudioTimeProcessed = 0; // Total audio time in milliseconds
+
 /**
  * Calculate scaled dimensions that fit within hardware limits while preserving aspect ratio
  * 
@@ -104,16 +108,21 @@ function calculateScaledDimensions(
 
 /**
  * Send A/V sync diagnostics update to main thread
- * Calculates drift as audioFrames - videoFrames (positive = audio ahead)
+ * Calculates drift as time difference in milliseconds (positive = audio ahead)
  */
 function sendSyncUpdate(): void {
   if (!ENABLE_DRIFT_DETECTION) return;
   
-  const drift = audioFramesProcessed - videoFramesProcessed;
+  // Calculate time-based drift in milliseconds
+  const timeDrift = totalAudioTimeProcessed - totalVideoTimeProcessed;
+  
+  // Also calculate frame-based drift for legacy compatibility
+  const frameDrift = audioFramesProcessed - videoFramesProcessed;
+  
   const syncData: SyncData = {
     videoFramesProcessed,
     audioFramesProcessed,
-    drift,
+    drift: Math.round(timeDrift), // Use time-based drift as primary metric
     timestamp: performance.now()
   };
   
@@ -407,6 +416,11 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     // Clean up the scaled frame after encoding
     scaledFrame.close();
     originalFrame.close();
+    
+    // Debug logging for downscaling path
+    if (videoFramesProcessed % 50 === 0) {
+      console.log(`Worker: Closed processed frame ${videoFramesProcessed + 1} after downscaling`);
+    }
 
     // Log performance if processing is slow
     const totalTime = bitmapTime + drawTime + frameCreateTime + encodeTime;
@@ -414,9 +428,13 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
       console.warn(`Worker: Slow downscaling detected - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
     }
 
-    // Drift detection: increment video frame counter
+    // Drift detection: increment video frame counter and track time
     if (ENABLE_DRIFT_DETECTION) {
       videoFramesProcessed++;
+      // Add frame duration to total video time (in milliseconds)
+      const frameDurationMs = (originalFrame.duration || 33333) / 1000; // Convert microseconds to milliseconds
+      totalVideoTimeProcessed += frameDurationMs;
+      
       if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
         sendSyncUpdate();
       }
@@ -424,8 +442,6 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
 
   } catch (error) {
     console.error('Worker: Error in processFrameWithDownscaling:', error);
-    throw error;
-  } catch (error) {
     // Clean up resources on error
     if (bitmap) {
       bitmap.close(); // Close the bitmap to release its memory
@@ -436,7 +452,7 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     originalFrame.close();
     throw error;
   } finally {
-    // Always clean up the bitmap, but frames are cleaned up in the main path
+    // Always clean up the bitmap, but frames are cleaned up in the main path or error handler
     if (bitmap) {
       bitmap.close(); // Close the bitmap to release its memory
     }
@@ -834,6 +850,8 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       videoFramesProcessed = 0;
       audioFramesProcessed = 0;
       videoFramesDropped = 0;
+      totalVideoTimeProcessed = 0;
+      totalAudioTimeProcessed = 0;
     }
 
     // Step 1: Determine target resolution based on user selection
@@ -1325,6 +1343,20 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
         break;
       }
       
+      // Safety check - ensure we have a valid frame
+      if (!frame) {
+        console.warn('Worker: Received null/undefined frame, skipping');
+        continue;
+      }
+      
+      // Debug: Log frame processing for debugging memory leaks
+      if (videoFramesProcessed % 50 === 0) {
+        console.log(`Worker: Processing video frame ${videoFramesProcessed + 1}, encoder queue: ${videoEncoder?.encodeQueueSize || 0}`);
+      }
+      
+      // Additional debug: Log when frames are actually closed
+      const frameProcessedCount = videoFramesProcessed + 1;
+      
       // Backpressure management: Balanced threshold for downscaling scenarios
       const queueThreshold = needsScaling ? 20 : 30; // Moderate threshold when downscaling
       if (videoEncoder && videoEncoder.encodeQueueSize > queueThreshold) {
@@ -1332,16 +1364,21 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
         videoFramesDropped++;
         console.warn(`Worker: Video encoder queue is full (${videoEncoder.encodeQueueSize}). Dropping frame to maintain sync. (Threshold: ${queueThreshold}, Dropped: ${videoFramesDropped})`);
         frame.close(); // Make sure to release the memory.
+        if (frameProcessedCount % 50 === 0) {
+          console.log(`Worker: Closed dropped frame ${frameProcessedCount} due to backpressure`);
+        }
         needsKeyFrame = true; // Flag that we need a keyframe to recover.
         continue; // Skip to the next frame.
       }
 
       // Encode the frame (with conditional downscaling)
       if (videoEncoder && frame) {
+        let frameClosed = false;
         try {
           if (needsScaling) {
             // Downscaling path: process frame through OffscreenCanvas
             await processFrameWithDownscaling(frame);
+            frameClosed = true; // processFrameWithDownscaling closes the original frame
           } else {
             // Direct path: encode frame as-is
             // If we just dropped frames, the next one we send MUST be a keyframe.
@@ -1353,9 +1390,20 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
               videoEncoder.encode(frame);
             }
             
-            // Drift detection: increment video frame counter
+            // Clean up the frame after encoding
+            frame.close();
+            frameClosed = true;
+            if (frameProcessedCount % 50 === 0) {
+              console.log(`Worker: Closed processed frame ${frameProcessedCount} after direct encoding`);
+            }
+            
+            // Drift detection: increment video frame counter and track time
             if (ENABLE_DRIFT_DETECTION) {
               videoFramesProcessed++;
+              // Add frame duration to total video time (in milliseconds)
+              const frameDurationMs = (frame.duration || 33333) / 1000; // Convert microseconds to milliseconds
+              totalVideoTimeProcessed += frameDurationMs;
+              
               if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
                 sendSyncUpdate();
               }
@@ -1363,11 +1411,12 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
           }
         } catch (encodingError) {
           console.error('Worker: Error during video frame processing:', encodingError);
+          // Clean up frame if not already closed
+          if (!frameClosed) {
+            frame.close();
+          }
           // Re-throw to be caught by outer try-catch
           throw encodingError;
-        } finally {
-          // Always release the original frame memory, even if encoding fails
-          frame.close();
         }
       }
     }
@@ -1457,9 +1506,13 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
           // Encode the frame (original, upmixed, or format-converted)
           audioEncoder.encode(finalFrameToEncode);
           
-          // Drift detection: increment audio frame counter
+          // Drift detection: increment audio frame counter and track time
           if (ENABLE_DRIFT_DETECTION) {
             audioFramesProcessed++;
+            // Calculate audio frame duration in milliseconds
+            const sampleRate = currentAudioConfig?.sampleRate || 44100;
+            const frameDurationMs = (audioFrame.numberOfFrames / sampleRate) * 1000;
+            totalAudioTimeProcessed += frameDurationMs;
           }
           
           // Clean up frames
@@ -1512,11 +1565,61 @@ async function handleStopMessage(): Promise<void> {
     if (ENABLE_DRIFT_DETECTION) {
       videoFramesProcessed = 0;
       audioFramesProcessed = 0;
+      totalVideoTimeProcessed = 0;
+      totalAudioTimeProcessed = 0;
     }
 
     // Step 1: Wait for Stream Readers to finish naturally - they should terminate
     // when the main thread processing loops see the stop signal
     console.log('Worker: Waiting for streams to close naturally...');
+    
+    // Drain any remaining frames from video stream to prevent leaks
+    if (streamReader) {
+      console.log('Worker: Attempting to drain remaining video frames...');
+      try {
+        let frameCount = 0;
+        while (true) {
+          const { done, value: frame } = await streamReader.read();
+          if (done) {
+            console.log('Worker: Video stream drain completed - no more frames');
+            break;
+          }
+          if (frame) {
+            frame.close(); // Close any remaining frames
+            frameCount++;
+          }
+        }
+        if (frameCount > 0) {
+          console.log(`Worker: Drained and closed ${frameCount} remaining video frames`);
+        } else {
+          console.log('Worker: No remaining video frames to drain');
+        }
+      } catch (drainError) {
+        console.warn('Worker: Error draining remaining video frames:', drainError);
+      }
+    } else {
+      console.log('Worker: No video stream reader to drain');
+    }
+    
+    // Drain any remaining frames from audio stream to prevent leaks
+    if (audioStreamReader) {
+      try {
+        let frameCount = 0;
+        while (true) {
+          const { done, value: frame } = await audioStreamReader.read();
+          if (done) break;
+          if (frame) {
+            frame.close(); // Close any remaining audio frames
+            frameCount++;
+          }
+        }
+        if (frameCount > 0) {
+          console.log(`Worker: Drained and closed ${frameCount} remaining audio frames`);
+        }
+      } catch (drainError) {
+        console.warn('Worker: Error draining remaining audio frames:', drainError);
+      }
+    }
     
     // Give a moment for the main thread processing loops to terminate gracefully
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1654,7 +1757,19 @@ async function handleStopMessage(): Promise<void> {
     recordingStartTime = null;
     hardwareAccelerationUsed = null;
 
-    // Step 6: Close Worker - Terminate this worker thread
+    // Step 6: Final cleanup - Force garbage collection to catch any remaining frames
+    // This is a last resort to ensure no frames are left unclosed
+    try {
+      // @ts-ignore - gc() is available in Node.js with --expose-gc flag
+      if (typeof gc !== 'undefined') {
+        // @ts-ignore
+        gc(); // Force garbage collection if available (dev environments)
+      }
+    } catch (gcError) {
+      // gc() not available in production, ignore
+    }
+    
+    // Step 7: Close Worker - Terminate this worker thread
     self.close();
 
   } catch (error) {
