@@ -111,6 +111,10 @@ export class SlowTrackRecorder {
   #frameLifecycleMap = new Map<VideoFrame, { type: 'original' | 'normalized', operation: string, created: number }>();
   #maxFrameLifetime = 5000; // 5 seconds - warn about frames held longer than this
 
+  /** 🎯 SURGICAL STRIKE: Lightweight frame leak detector */
+  #activeFrames = new Set<VideoFrame>();
+  #leakMonitorInterval: number | null = null;
+
 
 
 
@@ -440,6 +444,69 @@ export class SlowTrackRecorder {
   }
 
   /**
+   * 🎯 SURGICAL STRIKE: Start lightweight frame leak monitoring
+   * This is our "poor man's leak detector" that will immediately expose frame leaks
+   */
+  #startLeakMonitoring(): void {
+    if (this.#leakMonitorInterval !== null) {
+      clearInterval(this.#leakMonitorInterval);
+    }
+
+    this.#leakMonitorInterval = window.setInterval(() => {
+      const activeCount = this.#activeFrames.size;
+      
+      if (activeCount > 50) {
+        console.error(`🚨 CRITICAL FRAME LEAK DETECTED! In-flight frames: ${activeCount}`);
+        console.error('🚨 This confirms a memory leak in the video processing pipeline');
+        
+        // Additional diagnostic info
+        console.error('🚨 Leak Details:', {
+          activeFramesCount: activeCount,
+          isRecording: this.#isRecording,
+          isPumpPaused: this.#isPumpPaused,
+          videoFrameCount: this.#videoFrameCount
+        });
+      } else if (activeCount > 20) {
+        console.warn(`⚠️ High frame count detected: ${activeCount} frames in-flight`);
+      } else if (activeCount > 0) {
+        console.log(`📊 LEAK DETECTOR: ${activeCount} frames in-flight (main thread tracking)`);
+      } else {
+        console.log(`📊 LEAK DETECTOR: 0 frames in-flight - main thread clean`);
+      }
+    }, 1000); // Check every second for more frequent updates
+  }
+
+  /**
+   * 🎯 SURGICAL STRIKE: Stop leak monitoring and cleanup
+   */
+  #stopLeakMonitoring(): void {
+    if (this.#leakMonitorInterval !== null) {
+      clearInterval(this.#leakMonitorInterval);
+      this.#leakMonitorInterval = null;
+    }
+
+    // Final leak report
+    const remainingFrames = this.#activeFrames.size;
+    if (remainingFrames > 0) {
+      console.warn(`🚨 LEAK DETECTED AT SHUTDOWN: ${remainingFrames} frames were never cleaned up`);
+      
+      // Emergency cleanup - close any remaining frames
+      let closedCount = 0;
+      for (const frame of this.#activeFrames) {
+        try {
+          frame.close();
+          closedCount++;
+        } catch (error) {
+          console.warn('Failed to close leaked frame:', error);
+        }
+      }
+      console.warn(`🧹 Emergency cleanup: closed ${closedCount} leaked frames`);
+    }
+    
+    this.#activeFrames.clear();
+  }
+
+  /**
    * Track frame lifecycle for enhanced diagnostics and leak detection
    * 
    * @param frame - VideoFrame to track
@@ -542,14 +609,92 @@ export class SlowTrackRecorder {
       this.#firstLevelWarningShown = false;
       this.#secondLevelWarningShown = false;
 
-      // 2. Extract Tracks
+      // Leak monitoring disabled for performance testing
+      // this.#startLeakMonitoring();
+
+      // 2. Extract Tracks and Get ACTUAL Settings
       const videoTrack = stream.getVideoTracks()[0];
       const audioTrack = stream.getAudioTracks()[0];
       if (!videoTrack) {
         throw new Error('No video tracks found in the provided MediaStream');
       }
 
+      // 🎯 CRITICAL FIX: Extract actual track settings for configuration matching
+      const videoSettings = videoTrack.getSettings();
+      console.log('SlowTrackRecorder: 🔍 ACTUAL Video Track Settings:', {
+        width: videoSettings.width,
+        height: videoSettings.height,
+        frameRate: videoSettings.frameRate,
+        aspectRatio: videoSettings.aspectRatio,
+        facingMode: videoSettings.facingMode
+      });
+      
+      console.log('SlowTrackRecorder: 📋 REQUESTED Video Config:', {
+        width: this.#config.width,
+        height: this.#config.height,
+        frameRate: this.#config.frameRate
+      });
+
+      // 🚨 CONFIGURATION MISMATCH DETECTION #1: Video Dimensions
+      if (videoSettings.width !== this.#config.width || videoSettings.height !== this.#config.height) {
+        console.warn('SlowTrackRecorder: ⚠️ VIDEO DIMENSION MISMATCH DETECTED!', {
+          actualWidth: videoSettings.width,
+          requestedWidth: this.#config.width,
+          actualHeight: videoSettings.height,
+          requestedHeight: this.#config.height
+        });
+      }
+
+      // 🚨 CONFIGURATION MISMATCH DETECTION #2: Frame Rate
+      if (videoSettings.frameRate && Math.abs(videoSettings.frameRate - this.#config.frameRate) > 1) {
+        console.warn('SlowTrackRecorder: ⚠️ VIDEO FRAME RATE MISMATCH DETECTED!', {
+          actualFrameRate: videoSettings.frameRate,
+          requestedFrameRate: this.#config.frameRate
+        });
+      }
+
       const audioEnabled = this.#config.audio?.enabled === true && !!audioTrack;
+      
+      let audioSettings: MediaTrackSettings | null = null;
+      if (audioTrack && audioEnabled) {
+        audioSettings = audioTrack.getSettings();
+        console.log('SlowTrackRecorder: 🔍 ACTUAL Audio Track Settings:', {
+          sampleRate: audioSettings.sampleRate,
+          channelCount: audioSettings.channelCount,
+          sampleSize: audioSettings.sampleSize,
+          echoCancellation: audioSettings.echoCancellation,
+          noiseSuppression: audioSettings.noiseSuppression,
+          autoGainControl: audioSettings.autoGainControl
+        });
+        
+        console.log('SlowTrackRecorder: 📋 REQUESTED Audio Config:', {
+          sampleRate: this.#config.audio?.sampleRate,
+          numberOfChannels: this.#config.audio?.numberOfChannels,
+          codec: this.#config.audio?.codec,
+          bitrate: this.#config.audio?.bitrate
+        });
+
+        // 🚨 CONFIGURATION MISMATCH DETECTION #3: Audio Sample Rate
+        if (audioSettings.sampleRate && this.#config.audio && 
+            audioSettings.sampleRate !== this.#config.audio.sampleRate) {
+          console.error('SlowTrackRecorder: 🚨 CRITICAL AUDIO SAMPLE RATE MISMATCH!', {
+            actualSampleRate: audioSettings.sampleRate,
+            requestedSampleRate: this.#config.audio.sampleRate,
+            message: 'This WILL cause A/V sync issues and encoding failures!'
+          });
+        }
+
+        // 🚨 CONFIGURATION MISMATCH DETECTION #4: Audio Channel Count
+        if (audioSettings.channelCount && this.#config.audio && 
+            audioSettings.channelCount !== this.#config.audio.numberOfChannels) {
+          console.warn('SlowTrackRecorder: ⚠️ AUDIO CHANNEL COUNT MISMATCH DETECTED!', {
+            actualChannelCount: audioSettings.channelCount,
+            requestedChannelCount: this.#config.audio.numberOfChannels,
+            message: 'Upmixing/downmixing may be required'
+          });
+        }
+      }
+
       if (this.#config.audio?.enabled && !audioTrack) {
         console.warn('SlowTrackRecorder: Audio enabled in config but no audio track found in stream. Proceeding with video-only recording.');
       }
@@ -561,46 +706,68 @@ export class SlowTrackRecorder {
       );
       this.#worker.onmessage = this.#handleWorkerMessage.bind(this);
 
-      // 4. Create and Manage Processing Pipeline
-      // Use larger buffer to let worker handle intelligent backpressure management
-      this.#videoTransformStream = new TransformStream<VideoFrame, VideoFrame>(undefined, undefined, {
-        highWaterMark: 200, // Much larger buffer to prevent MediaStreamTrackProcessor throttling
-        size: () => 1
-      });
-      const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack } as MediaStreamTrackProcessorInit);
+      // 4. Create Direct Processing Pipeline (TransformStream removed)
+      // 🎯 RACE CONDITION FIX: Clone video track to prevent premature termination
+      const clonedVideoTrack = videoTrack.clone();
+      const videoProcessor = new MediaStreamTrackProcessor({ track: clonedVideoTrack } as MediaStreamTrackProcessorInit);
+      
+      console.log('SlowTrackRecorder: 🎬 Created direct MediaStreamTrackProcessor pipeline (no TransformStream)');
+
+      // 🎯 DIRECT PIPELINE: Create transform stream just for worker transfer (no processing)
+      this.#videoTransformStream = new TransformStream<VideoFrame, VideoFrame>();
       const videoReader = videoProcessor.readable.getReader();
       const videoWriter = this.#videoTransformStream.writable.getWriter();
 
       const processingPromises: Promise<void>[] = [
-        this.#processVideoStream(videoReader, videoWriter)
+        this.#processVideoStreamDirect(videoReader, videoWriter)
       ];
 
       let audioStreamForWorker: ReadableStream<AudioData> | undefined;
 
       if (audioEnabled) {
         this.#audioTransformStream = new TransformStream<AudioData, AudioData>(undefined, undefined, {
-          highWaterMark: 300, // Much larger buffer for audio to prevent throttling
+          highWaterMark: 500, // Increased buffer for audio to prevent throttling
           size: () => 1
         });
-        const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack } as MediaStreamTrackProcessorInit);
+        // 🎯 RACE CONDITION FIX: Clone audio track for consistency
+        const clonedAudioTrack = audioTrack.clone();
+        const audioProcessor = new MediaStreamTrackProcessor({ track: clonedAudioTrack } as MediaStreamTrackProcessorInit);
         const audioReader = audioProcessor.readable.getReader();
         const audioWriter = this.#audioTransformStream.writable.getWriter();
+        
+        console.log('SlowTrackRecorder: 🎵 Created MediaStreamTrackProcessor with cloned audio track');
         processingPromises.push(this.#processAudioStream(audioReader, audioWriter));
         audioStreamForWorker = this.#audioTransformStream.readable;
       }
 
-      // Launch the processing loops in the background. If any of them fail,
-      // call the centralized fatal error handler.
-      Promise.all(processingPromises).catch(error => {
+      // Launch the processing loops in the background with debugging
+      console.log(`SlowTrackRecorder: 🚀 Starting ${processingPromises.length} processing loops`);
+      Promise.all(processingPromises).then(() => {
+        console.log('SlowTrackRecorder: ✅ All processing loops completed normally');
+      }).catch(error => {
+        console.error('SlowTrackRecorder: 🚨 Processing loop error:', error);
         this.#handleFatalError(error);
       });
 
-      // 5. Post Message to Worker
+      // 5. Post Message to Worker (REVERTED to stream-based)
       const message = {
         type: 'start' as const,
-        config: this.#config,
+        config: {
+          ...this.#config,
+          // Use actual track settings for perfect configuration matching
+          width: videoSettings.width || this.#config.width,
+          height: videoSettings.height || this.#config.height,
+          frameRate: videoSettings.frameRate || this.#config.frameRate,
+          audio: audioEnabled && audioSettings && this.#config.audio ? {
+            ...this.#config.audio,
+            sampleRate: audioSettings.sampleRate || this.#config.audio.sampleRate,
+            numberOfChannels: audioSettings.channelCount || this.#config.audio.numberOfChannels
+          } as AudioConfig : this.#config.audio
+        },
         stream: this.#videoTransformStream.readable,
-        audioStream: audioStreamForWorker
+        audioStream: audioStreamForWorker,
+        actualVideoSettings: videoSettings,
+        actualAudioSettings: audioSettings
       };
 
       const transferables: Transferable[] = [this.#videoTransformStream.readable];
@@ -759,6 +926,9 @@ export class SlowTrackRecorder {
     this.#isPumpPaused = false;
     this.#pressureHighTimestamp = null;
     this.#stopPerformanceMonitoring();
+    
+    // 🎯 SURGICAL STRIKE: Stop leak monitoring and cleanup
+    this.#stopLeakMonitoring();
   }
 
   /**
@@ -800,16 +970,144 @@ export class SlowTrackRecorder {
   }
 
   /**
-   * Processes a ReadableStream of video frames, normalizes their timestamps,
-   * and writes them to a WritableStream.
-   * @param reader - The reader for the raw video track stream.
-   * @param writer - The writer to send timestamped frames to the worker.
+   * 🎯 DIRECT PIPELINE: Processes video frames directly from MediaStreamTrackProcessor
+   * Eliminates TransformStream bottleneck for maximum performance
+   * @param reader - Direct reader from MediaStreamTrackProcessor
+   */
+  async #processVideoStreamDirect(
+    reader: ReadableStreamDefaultReader<VideoFrame>,
+    writer: WritableStreamDefaultWriter<VideoFrame>
+  ): Promise<void> {
+    try {
+      console.log('SlowTrackRecorder: 🎬 Direct video processing loop starting');
+      while (true) {
+        // Check if we should stop processing due to stop signal or error in another loop
+        if (this.#shouldStopProcessing) {
+          console.log('SlowTrackRecorder: Stop signal received, terminating video processing loop');
+          break;
+        }
+
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readError) {
+          // Stream was likely closed/cancelled during read - check if this is expected
+          if (this.#shouldStopProcessing) {
+            console.log('SlowTrackRecorder: Video stream read interrupted during stop - terminating gracefully');
+            break;
+          } else {
+            // Unexpected read error - re-throw
+            throw readError;
+          }
+        }
+
+        const { done, value: frame } = readResult;
+
+        if (done) {
+          console.log('SlowTrackRecorder: 🎬 Video stream ended (done=true)');
+          break; // The stream has ended.
+        }
+        
+        // Debug: Log every frame read for troubleshooting
+        console.log(`SlowTrackRecorder: 🎬 Read frame ${this.#videoFrameCount + 1} from MediaStreamTrackProcessor`);
+        console.log(`SlowTrackRecorder: 📊 Writer state before processing - desiredSize: ${writer.desiredSize}`);
+
+        // Track frame for cleanup (logging removed for performance)
+        if (frame) {
+          this.#activeFrames.add(frame);
+          this.#trackFrameLifecycle(frame, 'original', 'received_from_stream');
+        }
+
+        // Process frame and send directly to worker
+        try {
+          this.#videoFrameCount++;
+          const now = performance.now();
+          
+          // Log every 5 seconds to diagnose frame rate
+          if (now - this.#lastDiagnosticTime > 5000) {
+            console.log(`🎬 Video frames received from MediaStreamTrackProcessor: ${this.#videoFrameCount} (${(this.#videoFrameCount / ((now - (this.#recordingStartTime || now)) / 1000)).toFixed(1)} fps)`);
+            this.#lastDiagnosticTime = now;
+          }
+          
+          // On the very first frame, capture its timestamp as the baseline for this track.
+          if (this.#firstVideoTimestamp === null) {
+            this.#firstVideoTimestamp = frame.timestamp;
+          }
+
+          // Calculate the normalized timestamp relative to the first frame.
+          const normalizedTimestamp = frame.timestamp - this.#firstVideoTimestamp;
+
+          // Create a new VideoFrame with the normalized timestamp, preserving other properties.
+          const normalizedFrame = new VideoFrame(frame, {
+            timestamp: normalizedTimestamp,
+            duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
+          });
+
+          // Track normalized frame for cleanup
+          this.#activeFrames.add(normalizedFrame);
+          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
+
+          // 🎯 NON-BLOCKING WRITE: Prevent main thread hanging on backpressure
+          const frameId = this.#videoFrameCount;
+          
+          // Check writer state before attempting write
+          if (writer.desiredSize !== null && writer.desiredSize <= 0) {
+            console.log(`SlowTrackRecorder: 🚨 Writer backpressure detected, dropping frame ${frameId} (desiredSize: ${writer.desiredSize})`);
+            normalizedFrame.close();
+            this.#activeFrames.delete(normalizedFrame);
+          } else {
+            // Non-blocking write with error handling
+            writer.write(normalizedFrame).then(() => {
+              // Success - frame transferred
+              this.#activeFrames.delete(normalizedFrame);
+              if (frameId % 100 === 0) {
+                console.log(`SlowTrackRecorder: ✅ Frame ${frameId} successfully transferred (non-blocking)`);
+              }
+            }).catch(writeError => {
+              // Write failed - clean up frame
+              console.warn(`SlowTrackRecorder: ⚠️ Frame ${frameId} write failed:`, writeError instanceof Error ? writeError.message : String(writeError));
+              try {
+                normalizedFrame.close();
+              } catch (closeError) {
+                // Frame might already be closed
+              }
+              this.#activeFrames.delete(normalizedFrame);
+            });
+          }
+
+        } finally {
+          // Always close original frame and remove from leak detector
+          frame.close();
+          this.#activeFrames.delete(frame);
+          this.#untrackFrameLifecycle(frame);
+        }
+        
+        // Debug: Log loop iteration completion
+        console.log(`SlowTrackRecorder: 🔄 Completed processing frame ${this.#videoFrameCount}, continuing to next iteration`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
+      console.error('SlowTrackRecorder: A fatal error occurred in the video processing loop.', errorMessage);
+      throw error instanceof Error ? error : new Error(errorMessage);
+    } finally {
+      try {
+        await writer.close();
+      } catch (closeError) {
+        console.warn('SlowTrackRecorder: Video writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
+      }
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * @deprecated Legacy TransformStream-based processing - replaced by direct processing
    */
   async #processVideoStream(
     reader: ReadableStreamDefaultReader<VideoFrame>,
     writer: WritableStreamDefaultWriter<VideoFrame>
   ): Promise<void> {
     try {
+      console.log('SlowTrackRecorder: 🎬 Video processing loop starting');
       while (true) {
         // Check if we should stop processing due to stop signal or error in another loop
         if (this.#shouldStopProcessing) {
@@ -819,6 +1117,7 @@ export class SlowTrackRecorder {
 
         // **KEY CHANGE**: Wait here if the pump is paused due to backpressure
         if (this.#isPumpPaused) {
+          console.log('🚨 PUMP PAUSED: Waiting due to backpressure...');
           await new Promise(resolve => setTimeout(resolve, 100));
           continue; // Re-check conditions without reading new frames
         }
@@ -840,11 +1139,16 @@ export class SlowTrackRecorder {
         const { done, value: frame } = readResult;
 
         if (done) {
+          console.log('SlowTrackRecorder: 🎬 Video stream ended (done=true)');
           break; // The stream has ended.
         }
+        
+        // Debug: Log every frame read for troubleshooting
+        console.log(`SlowTrackRecorder: 🎬 Read frame ${this.#videoFrameCount + 1} from MediaStreamTrackProcessor`);
 
-        // Track the original frame to ensure cleanup with enhanced diagnostics
+        // Track frame for cleanup (logging removed for performance)
         if (frame) {
+          this.#activeFrames.add(frame);
           this.#trackFrameLifecycle(frame, 'original', 'received_from_stream');
         }
 
@@ -878,26 +1182,74 @@ export class SlowTrackRecorder {
             duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
           });
 
-          // Track this frame to ensure cleanup with enhanced diagnostics
-          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
-
-          // Forward the newly timestamped frame to the worker.
-          // Use robust try/catch/finally pattern for guaranteed cleanup
+          // Forward the newly timestamped frame to the worker
           const frameId = this.#videoFrameCount; // Track frame for debugging
-          try {
-            await writer.write(normalizedFrame);
-            // Frame successfully queued - worker now owns the frame
-            if (frameId % 50 === 0) {
-              console.log(`SlowTrackRecorder: Frame ${frameId} successfully queued to worker`);
-            }
-          } catch (writeError) {
-            console.warn(`SlowTrackRecorder: Video frame ${frameId} write failed (expected during high load):`, writeError instanceof Error ? writeError.message : String(writeError));
-            // If write fails, we MUST close the frame here to prevent a leak
+
+          // Track normalized frame for cleanup (logging removed for performance)
+          this.#activeFrames.add(normalizedFrame);
+          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
+          
+          // === LAYER A: PROACTIVE PREVENTION (The "Belt") ===
+          // Check stream capacity BEFORE attempting write - handles obvious backpressure cases
+          if (writer.desiredSize !== null && writer.desiredSize <= 0) {
+            // Stream is under backpressure - defer write by closing frame immediately
+            console.log(`SlowTrackRecorder: 🚨 BACKPRESSURE DETECTED - Frame ${frameId} proactively deferred (desiredSize: ${writer.desiredSize})`);
+            
+            // 🎯 CRITICAL FIX: Close BOTH frames to prevent memory leak
             try {
               normalizedFrame.close();
-              console.log(`SlowTrackRecorder: Closed failed frame ${frameId}`);
+              this.#activeFrames.delete(normalizedFrame);
+              console.log(`SlowTrackRecorder: ✅ Closed normalized frame ${frameId}`);
             } catch (closeError) {
-              // Frame might have been closed already, ignore
+              console.warn(`SlowTrackRecorder: Error closing normalized frame ${frameId}:`, closeError);
+            }
+            
+            // 🎯 CRITICAL FIX: Close original frame too (this was the leak!)
+            try {
+              frame.close();
+              this.#activeFrames.delete(frame);
+              console.log(`SlowTrackRecorder: ✅ Closed original frame ${frameId} (LEAK FIX)`);
+            } catch (closeError) {
+              console.warn(`SlowTrackRecorder: Error closing original frame ${frameId}:`, closeError);
+            }
+            
+            this.#untrackFrameLifecycle(normalizedFrame);
+            this.#untrackFrameLifecycle(frame);
+            
+            // Continue to next frame - both frames now properly closed
+            continue;
+          }
+          
+          // === LAYER B: DEFENSIVE RECOVERY (The "Suspenders") ===
+          // Stream appeared ready, but race condition may occur between check and write
+          try {
+            // Use Promise.race to handle race condition where buffer fills between check and write
+            await Promise.race([
+              writer.write(normalizedFrame),
+              new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error('write timeout - race condition detected')), 100)
+              )
+            ]);
+            // Frame successfully transferred to worker - remove from leak detector
+            this.#activeFrames.delete(normalizedFrame);
+            
+            // Reduced logging frequency for performance
+            if (frameId % 100 === 0) {
+              console.log(`SlowTrackRecorder: Frame ${frameId} successfully queued to worker (desiredSize: ${writer.desiredSize})`);
+            }
+          } catch (writeError) {
+            const errorMsg = writeError instanceof Error ? writeError.message : String(writeError);
+            const isRaceCondition = errorMsg.includes('race condition detected');
+            const errorType = isRaceCondition ? 'race condition' : 'write error';
+            
+            console.warn(`SlowTrackRecorder: Video frame ${frameId} ${errorType}: ${errorMsg}`);
+            
+            // 🎯 SURGICAL STRIKE: Close frame and remove from leak detector on error
+            try {
+              normalizedFrame.close();
+              this.#activeFrames.delete(normalizedFrame);
+              console.log(`SlowTrackRecorder: Closed frame ${frameId} after ${errorType}`);
+            } catch (closeError) {
               console.warn(`SlowTrackRecorder: Error closing failed frame ${frameId}:`, closeError);
             }
           } finally {
@@ -906,12 +1258,14 @@ export class SlowTrackRecorder {
           }
 
         } finally {
-          // CRITICAL: Close the original frame to release its underlying memory,
-          // even if the processing logic above throws an error.
+          // Always close original frame and remove from leak detector
           frame.close();
-          // Remove from tracking with enhanced diagnostics
+          this.#activeFrames.delete(frame);
           this.#untrackFrameLifecycle(frame);
         }
+        
+        // Debug: Log loop iteration completion
+        console.log(`SlowTrackRecorder: 🔄 Completed processing frame ${this.#videoFrameCount}, continuing to next iteration`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');

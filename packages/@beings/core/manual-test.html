@@ -3291,9 +3291,20 @@
                     });
                 }
                 
-                const constraints = frameRateTarget === 'auto' 
-                    ? { video: true, audio: audioConstraints }
-                    : { video: { frameRate: { ideal: parseInt(frameRateTarget) } }, audio: audioConstraints };
+                // 🎯 PERFORMANCE FIX: Add resolution constraints to reduce worker load
+                // Request optimal resolution to minimize downscaling overhead in worker
+                const videoConstraints = frameRateTarget === 'auto' 
+                    ? { 
+                        width: { ideal: 1920 }, // Suggest 1080p to reduce worker processing load
+                        height: { ideal: 1080 }
+                    }
+                    : { 
+                        width: { ideal: 1920 }, // Suggest 1080p to reduce worker processing load
+                        height: { ideal: 1080 },
+                        frameRate: { ideal: parseInt(frameRateTarget) } 
+                    };
+                
+                const constraints = { video: videoConstraints, audio: audioConstraints };
                 
                 // Get screenshare stream
                 mediaStream = await navigator.mediaDevices.getDisplayMedia(constraints);
@@ -3420,8 +3431,64 @@
                 
                 showStatus('Screen capture started - click Record to begin recording', 'success');
 
-                // Show live preview
-                previewVideo.srcObject = mediaStream;
+                // 🎯 DUAL CLONING FIX: Create separate tracks for preview and recording
+                const originalVideoTrack = mediaStream.getVideoTracks()[0];
+                const originalAudioTrack = mediaStream.getAudioTracks()[0];
+                
+                // Create independent clones for different purposes
+                const previewVideoTrack = originalVideoTrack.clone();
+                const previewAudioTrack = originalAudioTrack?.clone();
+                
+                // Create dedicated preview stream with cloned tracks
+                const previewTracks = [previewVideoTrack];
+                if (previewAudioTrack) {
+                    previewTracks.push(previewAudioTrack);
+                }
+                const previewStream = new MediaStream(previewTracks);
+                
+                console.log('🎯 DUAL CLONING: Created independent preview stream with cloned tracks');
+                
+                // Show live preview with dedicated stream
+                previewVideo.srcObject = previewStream;
+                
+                // Store original stream for recorder (it will create its own clones)
+                window.originalMediaStream = mediaStream;
+                
+                // Debug: Monitor track states
+                console.log('🎯 TRACK STATES:', {
+                    originalVideoTrack: originalVideoTrack.readyState,
+                    previewVideoTrack: previewVideoTrack.readyState,
+                    originalAudioTrack: originalAudioTrack?.readyState,
+                    previewAudioTrack: previewAudioTrack?.readyState
+                });
+                
+                // 🔍 DEBUG: Monitor preview video element
+                previewVideo.addEventListener('loadedmetadata', () => {
+                    console.log('🎯 PREVIEW: Video metadata loaded', {
+                        videoWidth: previewVideo.videoWidth,
+                        videoHeight: previewVideo.videoHeight,
+                        duration: previewVideo.duration
+                    });
+                });
+                
+                previewVideo.addEventListener('playing', () => {
+                    console.log('🎯 PREVIEW: Video started playing');
+                });
+                
+                previewVideo.addEventListener('pause', () => {
+                    console.log('🎯 PREVIEW: Video paused');
+                });
+                
+                previewVideo.addEventListener('ended', () => {
+                    console.log('🎯 PREVIEW: Video ended');
+                });
+                
+                // Force play the preview
+                previewVideo.play().then(() => {
+                    console.log('🎯 PREVIEW: Successfully started preview playback');
+                }).catch(error => {
+                    console.error('🎯 PREVIEW: Failed to start preview playback:', error);
+                });
                 
                 // Track when screen sharing stops
                 mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -3734,9 +3801,10 @@
                     updateSyncDiagnostics(syncData);
                 });
 
-                // Start recording
+                // Start recording with original stream (recorder will create its own clones)
                 showStatus('Detecting optimal codec...', 'info');
-                await recorder.start(mediaStream);
+                console.log('🎯 DUAL CLONING: Starting recorder with original MediaStream (separate from preview)');
+                await recorder.start(window.originalMediaStream || mediaStream);
                 console.log('Recording started');
                 
                 // Reset analysis section for new recording

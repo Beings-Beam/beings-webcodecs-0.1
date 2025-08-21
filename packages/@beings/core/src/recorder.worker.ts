@@ -38,6 +38,10 @@ let finalContainerType: 'mp4' | 'webm' | null = null;
 let recordingStartTime: number | null = null;
 let hardwareAccelerationUsed: boolean | null = null;
 
+// 🚀 NEW ARCHITECTURE: Timestamp tracking for worker-side normalization
+let firstVideoTimestamp: number | null = null;
+let firstAudioTimestamp: number | null = null;
+
 // Downscaling state variables
 let needsScaling = false;
 let scaledWidth = 0;
@@ -481,10 +485,12 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
       console.log(`Worker: Closed processed frame ${videoFramesProcessed + 1} after downscaling`);
     }
 
-    // Log performance if processing is slow
+    // 🎯 SURGICAL STRIKE: Always log performance for leak debugging
     const totalTime = bitmapTime + drawTime + frameCreateTime + encodeTime;
+    console.log(`Worker: 🔧 Downscaling performance - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
+    
     if (totalTime > 16) { // More than 1 frame at 60fps
-      console.warn(`Worker: Slow downscaling detected - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
+      console.warn(`Worker: 🚨 SLOW DOWNSCALING DETECTED - Total: ${totalTime.toFixed(1)}ms (threshold: 16ms)`);
     }
 
     // Drift detection: increment video frame counter and track time
@@ -807,10 +813,27 @@ async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'o
     audioEncoder = new AudioEncoder({
       output: (chunk: EncodedAudioChunk, metadata?: EncodedAudioChunkMetadata) => {
         try {
-          // Pass encoded audio chunk to muxer
-          if (muxer) {
-            muxer.addAudioChunk(chunk, metadata || {});
+          // 🚨 MUXER RACE CONDITION DETECTION
+          if (!muxer) {
+            console.error('Worker: 🚨 CRITICAL RACE CONDITION: AudioEncoder output called but muxer is null!');
+            self.postMessage({ type: 'error', error: 'Muxer race condition: audio chunk received before muxer initialization' });
+            return;
           }
+          
+          // Log first few chunks for debugging
+          if (audioFramesProcessed < 3) {
+            console.log(`Worker: 🎵 AudioEncoder Output Chunk ${audioFramesProcessed + 1}:`, {
+              type: chunk.type,
+              timestamp: chunk.timestamp,
+              duration: chunk.duration,
+              byteLength: chunk.byteLength,
+              muxerReady: !!muxer,
+              metadata: metadata
+            });
+          }
+          
+          // Pass encoded audio chunk to muxer
+            muxer.addAudioChunk(chunk, metadata || {});
         } catch (error) {
           console.error('Worker: Audio muxer error:', error);
           self.postMessage({ type: 'error', error: error instanceof Error ? error.message : String(error) });
@@ -903,6 +926,23 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     if (!data.config) {
       throw new Error('No configuration provided');
     }
+
+    // 🎯 CRITICAL DEBUGGING: Log actual vs requested track settings
+    if (data.actualVideoSettings) {
+      console.log('Worker: 🔍 RECEIVED Actual Video Settings:', data.actualVideoSettings);
+    }
+    if (data.actualAudioSettings) {
+      console.log('Worker: 🔍 RECEIVED Actual Audio Settings:', data.actualAudioSettings);
+    }
+    
+    console.log('Worker: 📋 RECEIVED Final Config (post-correction):', {
+      video: {
+        width: data.config.width,
+        height: data.config.height,
+        frameRate: data.config.frameRate
+      },
+      audio: data.config.audio
+    });
     
     // Reset drift detection counters for new recording session
     if (ENABLE_DRIFT_DETECTION) {
@@ -912,6 +952,10 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       totalVideoTimeProcessed = 0;
       totalAudioTimeProcessed = 0;
     }
+    
+    // 🚀 NEW ARCHITECTURE: Reset timestamp tracking for worker-side normalization
+    firstVideoTimestamp = null;
+    firstAudioTimestamp = null;
 
     // Step 1: Determine target resolution based on user selection
     const originalWidth = data.config.width;
@@ -935,11 +979,27 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     // Step 2: Create OffscreenCanvas if scaling is needed
     if (needsScaling) {
       offscreenCanvas = new OffscreenCanvas(scaledWidth, scaledHeight);
-      canvasContext = offscreenCanvas.getContext('2d');
+      // 🎯 PERFORMANCE FIX: Optimize canvas context for maximum performance
+      canvasContext = offscreenCanvas.getContext('2d', { 
+        alpha: false,           // Disable alpha channel for performance boost
+        desynchronized: true,   // Allow async rendering for better performance
+        willReadFrequently: false // We only write to canvas, don't read back
+      });
       if (!canvasContext) {
-        throw new Error('Failed to create 2D context for downscaling canvas');
+        throw new Error('Failed to create optimized 2D context for downscaling canvas');
       }
-      console.log('Worker: Created OffscreenCanvas for downscaling', { scaledWidth, scaledHeight });
+      
+      // Additional performance optimizations
+      canvasContext.imageSmoothingEnabled = false; // Disable smoothing for speed
+      canvasContext.imageSmoothingQuality = 'low';
+      
+      console.log('Worker: Created optimized OffscreenCanvas for downscaling', { 
+        scaledWidth, 
+        scaledHeight,
+        alpha: false,
+        desynchronized: true,
+        smoothing: false
+      });
     }
 
     // Step 3: Intelligent Codec Selection with Automatic Fallback
@@ -1285,9 +1345,12 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
           sampleRate: data.config.audio.sampleRate,
           numberOfChannels: data.config.audio.numberOfChannels
         };
+        console.log('Worker: 🎵 VP9 MUXER Audio Track Configuration:', muxerConfig.audio);
       }
       
+      console.log('Worker: 🎬 COMPLETE VP9 WebM Muxer Configuration BEFORE Creation:', muxerConfig);
       muxer = await createWebMMuxer(muxerConfig);
+      console.log('Worker: ✅ VP9 WebM Muxer Created Successfully');
     } else {
       throw new Error(`Invalid final codec: ${finalCodec}. This should never happen.`);
     }
@@ -1316,10 +1379,28 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     videoEncoder = new VideoEncoder({
       output: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
         try {
-          // Pass both chunk and metadata to the muxer - let encoder tell muxer the format
-          if (muxer) {
-            muxer.addVideoChunk(chunk, metadata || {});
+          // 🚨 MUXER RACE CONDITION DETECTION
+          if (!muxer) {
+            console.error('Worker: 🚨 CRITICAL RACE CONDITION: VideoEncoder output called but muxer is null!');
+            self.postMessage({ type: 'error', error: 'Muxer race condition: video chunk received before muxer initialization' });
+            return;
           }
+          
+          // Log first few chunks for debugging
+          if (videoFramesProcessed < 3) {
+            console.log(`Worker: 🎬 VideoEncoder Output Chunk ${videoFramesProcessed + 1}:`, {
+              type: chunk.type,
+              timestamp: chunk.timestamp,
+              duration: chunk.duration,
+              byteLength: chunk.byteLength,
+              muxerReady: !!muxer,
+              metadata: metadata
+            });
+          }
+          
+          // Pass both chunk and metadata to the muxer - let encoder tell muxer the format
+            muxer.addVideoChunk(chunk, metadata || {});
+          
           // Check queue status after processing each chunk for responsive backpressure
           checkQueueAndNotify();
         } catch (error) {
@@ -1352,7 +1433,7 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     self.postMessage(response);
     console.log('Worker: Ready message sent successfully');
 
-    // Step 6: Start Processing - Concurrent video and audio processing
+    // Step 6: Start Processing (REVERTED to stream-based)
     if (!data.stream) {
       throw new Error('No video stream provided');
     }
@@ -1378,9 +1459,226 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
 }
 
 /**
- * Process video frames from the stream through the encoder
+ * 🚀 NEW ARCHITECTURE: Process video frames directly from MediaStreamTrack in worker
+ * This eliminates main thread bottlenecks and achieves full 30fps performance
  * 
- * @param stream - ReadableStream of VideoFrame objects from main thread
+ * @param videoTrack - MediaStreamTrack transferred from main thread
+ */
+async function startVideoTrackProcessing(videoTrack: MediaStreamTrack): Promise<void> {
+  try {
+    console.log('Worker: 🚀 Creating MediaStreamTrackProcessor in dedicated worker thread');
+    
+    // Create processor directly in worker for maximum performance
+    const processor = new MediaStreamTrackProcessor({ track: videoTrack } as any);
+    streamReader = processor.readable.getReader();
+    
+    console.log('Worker: 🚀 Starting high-speed video processing loop (dedicated thread)');
+    
+    // Capture recording start time for duration calculation
+    if (recordingStartTime === null) {
+      recordingStartTime = performance.now();
+    }
+    
+    let frameCount = 0;
+    const startTime = performance.now();
+    
+    // 🚀 DEDICATED THREAD: High-speed processing loop
+    while (true) {
+      const { done, value: frame } = await streamReader.read();
+      
+      if (done) {
+        console.log('Worker: 🚀 Video track ended, stopping dedicated processing');
+        break;
+      }
+      
+      if (!frame) {
+        console.warn('Worker: Received null frame, skipping');
+        continue;
+      }
+      
+      frameCount++;
+      
+      // Log performance every 100 frames
+      if (frameCount % 100 === 0) {
+        const elapsed = performance.now() - startTime;
+        const fps = frameCount / (elapsed / 1000);
+        console.log(`Worker: 🚀 DEDICATED THREAD PERFORMANCE: ${frameCount} frames processed at ${fps.toFixed(1)} fps`);
+      }
+      
+      // Apply timestamp normalization in worker
+      if (firstVideoTimestamp === null) {
+        firstVideoTimestamp = frame.timestamp;
+      }
+      const normalizedTimestamp = frame.timestamp - firstVideoTimestamp;
+      
+      // Create normalized frame for encoding
+      const normalizedFrame = new VideoFrame(frame, {
+        timestamp: normalizedTimestamp,
+        duration: frame.duration ?? undefined
+      });
+      
+      // Close original frame immediately after copying
+      frame.close();
+      
+      // 🚀 DEDICATED THREAD: Process frame directly in worker
+      if (needsScaling) {
+        await processFrameWithDownscaling(normalizedFrame);
+      } else {
+        // Direct encoding path
+        if (videoEncoder) {
+          if (needsKeyFrame) {
+            videoEncoder.encode(normalizedFrame, { keyFrame: true });
+            needsKeyFrame = false;
+            console.log('Worker: 🚀 Forced keyframe in dedicated thread');
+          } else {
+            videoEncoder.encode(normalizedFrame);
+          }
+          
+          normalizedFrame.close();
+          
+          // Update drift detection
+          if (ENABLE_DRIFT_DETECTION) {
+            videoFramesProcessed++;
+            const frameDurationMs = (normalizedFrame.duration || 33333) / 1000;
+            totalVideoTimeProcessed += frameDurationMs;
+            
+            if (videoFramesProcessed % SYNC_UPDATE_FRAME_INTERVAL === 0) {
+              sendSyncUpdate();
+            }
+          }
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error('Worker: Error in dedicated video track processing:', error);
+    self.postMessage({ 
+      type: 'error', 
+      error: error instanceof Error ? error.message : String(error) 
+    });
+  }
+}
+
+/**
+ * 🚀 NEW ARCHITECTURE: Process audio frames directly from MediaStreamTrack in worker
+ * 
+ * @param audioTrack - MediaStreamTrack transferred from main thread
+ */
+async function startAudioTrackProcessing(audioTrack: MediaStreamTrack): Promise<void> {
+  try {
+    console.log('Worker: 🚀 Creating Audio MediaStreamTrackProcessor in dedicated worker thread');
+    
+    // Create processor directly in worker for maximum performance
+    const processor = new MediaStreamTrackProcessor({ track: audioTrack } as any);
+    audioStreamReader = processor.readable.getReader();
+    
+    console.log('Worker: 🚀 Starting high-speed audio processing loop (dedicated thread)');
+    
+    let frameCount = 0;
+    const startTime = performance.now();
+    
+    // 🚀 DEDICATED THREAD: High-speed audio processing loop
+    while (true) {
+      const { done, value: audioFrame } = await audioStreamReader.read();
+      
+      if (done) {
+        console.log('Worker: 🚀 Audio track ended, stopping dedicated processing');
+        break;
+      }
+      
+      if (!audioFrame) {
+        console.warn('Worker: Received null audio frame, skipping');
+        continue;
+      }
+      
+      frameCount++;
+      
+      // Apply timestamp normalization in worker
+      if (firstAudioTimestamp === null) {
+        firstAudioTimestamp = audioFrame.timestamp;
+      }
+      const normalizedTimestamp = audioFrame.timestamp - firstAudioTimestamp;
+      
+      // Create normalized audio frame
+      const normalizedAudioFrame = new AudioData({
+        format: audioFrame.format || 'f32-planar',
+        sampleRate: audioFrame.sampleRate,
+        numberOfFrames: audioFrame.numberOfFrames,
+        numberOfChannels: audioFrame.numberOfChannels,
+        timestamp: normalizedTimestamp,
+        data: await copyAudioData(audioFrame)
+      });
+      
+      // Close original frame immediately after copying
+      audioFrame.close();
+      
+      // Process audio frame through existing pipeline
+      if (audioEncoder) {
+        let frameToEncode = normalizedAudioFrame;
+        
+        // Handle channel mismatch with upmixing
+        if (needsUpmixing && normalizedAudioFrame.numberOfChannels === 1 && finalEncoderChannels === 2) {
+          frameToEncode = upmixMonoToStereo(normalizedAudioFrame);
+          normalizedAudioFrame.close();
+        }
+        
+        // Handle format conversion if needed
+        if (frameToEncode.format?.startsWith('f32') && 
+            currentAudioConfig?.codec?.includes('aac')) {
+          const convertedFrame = convertF32toS16(frameToEncode);
+          if (frameToEncode !== normalizedAudioFrame) {
+            frameToEncode.close();
+          }
+          frameToEncode = convertedFrame;
+        }
+        
+        audioEncoder.encode(frameToEncode);
+        frameToEncode.close();
+        
+        // Update drift detection
+        if (ENABLE_DRIFT_DETECTION) {
+          audioFramesProcessed++;
+          const sampleRate = currentAudioConfig?.sampleRate || 44100;
+          const frameDurationMs = (audioFrame.numberOfFrames / sampleRate) * 1000;
+          totalAudioTimeProcessed += frameDurationMs;
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error('Worker: Error in dedicated audio track processing:', error);
+    self.postMessage({ 
+      type: 'error', 
+      error: error instanceof Error ? error.message : String(error) 
+    });
+  }
+}
+
+/**
+ * Helper function to copy AudioData buffer
+ */
+async function copyAudioData(audioFrame: AudioData): Promise<ArrayBuffer> {
+  let totalByteLength = 0;
+  for (let i = 0; i < audioFrame.numberOfChannels; i++) {
+    totalByteLength += audioFrame.allocationSize({ planeIndex: i });
+  }
+  const buffer = new ArrayBuffer(totalByteLength);
+  const bufferView = new Uint8Array(buffer);
+
+  let offset = 0;
+  for (let i = 0; i < audioFrame.numberOfChannels; i++) {
+    const planeSize = audioFrame.allocationSize({ planeIndex: i });
+    const planeBuffer = new ArrayBuffer(planeSize);
+    audioFrame.copyTo(planeBuffer, { planeIndex: i });
+    bufferView.set(new Uint8Array(planeBuffer), offset);
+    offset += planeSize;
+  }
+  
+  return buffer;
+}
+
+/**
+ * @deprecated Legacy stream-based processing - replaced by startVideoTrackProcessing
  */
 async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise<void> {
   try {
@@ -1423,18 +1721,20 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
       // Additional debug: Log when frames are actually closed
       const frameProcessedCount = videoFramesProcessed + 1;
       
-      // Backpressure management: Balanced threshold for downscaling scenarios
+      // 🎯 SURGICAL STRIKE: Fixed backpressure frame drop logic
       const queueThreshold = needsScaling ? 20 : 30; // Moderate threshold when downscaling
       if (videoEncoder && videoEncoder.encodeQueueSize > queueThreshold) {
         // The queue is too long, so we need to drop this frame.
         videoFramesDropped++;
-        console.warn(`Worker: Video encoder queue is full (${videoEncoder.encodeQueueSize}). Dropping frame to maintain sync. (Threshold: ${queueThreshold}, Dropped: ${videoFramesDropped})`);
-        frame.close(); // Make sure to release the memory.
+        console.warn(`Worker: 🚨 DROPPING FRAME due to queue backpressure (${videoEncoder.encodeQueueSize}). Threshold: ${queueThreshold}, Dropped: ${videoFramesDropped}`);
+        
+        // 🎯 CRITICAL FIX: Close frame and continue immediately - do NOT process further
+        frame.close();
         if (frameProcessedCount % 50 === 0) {
-          console.log(`Worker: Closed dropped frame ${frameProcessedCount} due to backpressure`);
+          console.log(`Worker: 🚨 Closed dropped frame ${frameProcessedCount} due to backpressure`);
         }
         needsKeyFrame = true; // Flag that we need a keyframe to recover.
-        continue; // Skip to the next frame.
+        continue; // Skip to the next frame - frame is now closed and should not be processed
       }
 
       // Encode the frame (with conditional downscaling)

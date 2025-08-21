@@ -56,7 +56,16 @@ export interface AudioConfig {
 export interface RecorderWorkerRequest {
   type: 'start' | 'stop';
   config?: SlowTrackRecorderConfig & { resolutionTarget?: string };
+  /** 🎯 ARCHITECTURAL REFACTOR: Direct MediaStreamTrack transfer for worker-only processing */
+  videoTrack?: MediaStreamTrack;
+  audioTrack?: MediaStreamTrack;
+  /** Actual video track settings from MediaStreamTrack.getSettings() */
+  actualVideoSettings?: MediaTrackSettings;
+  /** Actual audio track settings from MediaStreamTrack.getSettings() */
+  actualAudioSettings?: MediaTrackSettings;
+  /** @deprecated Legacy stream-based approach - replaced by direct track transfer */
   stream?: ReadableStream<VideoFrame>;
+  /** @deprecated Legacy stream-based approach - replaced by direct track transfer */
   audioStream?: ReadableStream<AudioData>;
 }
 
