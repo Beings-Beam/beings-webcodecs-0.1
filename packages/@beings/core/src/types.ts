@@ -51,7 +51,28 @@ export interface AudioConfig {
 }
 
 /**
- * Message interface for communication from main thread to worker
+ * Message interface for communication from main thread to video worker
+ */
+export interface VideoWorkerRequest {
+  type: 'start' | 'stop';
+  config?: SlowTrackRecorderConfig & { resolutionTarget?: string };
+  videoStream?: ReadableStream<VideoFrame>;
+  actualVideoSettings?: MediaTrackSettings;
+}
+
+/**
+ * Message interface for communication from main thread to audio worker
+ */
+export interface AudioWorkerRequest {
+  type: 'start' | 'stop';
+  config?: SlowTrackRecorderConfig & { resolutionTarget?: string };
+  audioStream?: ReadableStream<AudioData>;
+  actualAudioSettings?: MediaTrackSettings;
+}
+
+/**
+ * Message interface for communication from main thread to legacy single worker
+ * @deprecated Use VideoWorkerRequest and AudioWorkerRequest for dual-worker architecture
  */
 export interface RecorderWorkerRequest {
   type: 'start' | 'stop';
@@ -89,10 +110,38 @@ export interface BackpressureStatus {
 }
 
 /**
- * Message interface for communication from worker to main thread
+ * Message interface for communication from video worker to main thread
+ */
+export interface VideoWorkerResponse {
+  type: 'ready' | 'error' | 'video-chunk' | 'pressure' | 'complete';
+  error?: string;
+  finalCodec?: 'av1' | 'hevc' | 'h264' | 'vp9';
+  chunk?: EncodedVideoChunk;
+  metadata?: EncodedVideoChunkMetadata;
+  /** Backpressure status for video encoder */
+  status?: 'high' | 'low';
+  queueSize?: number;
+  immediate?: boolean;
+  consecutiveCount?: number;
+}
+
+/**
+ * Message interface for communication from audio worker to main thread
+ */
+export interface AudioWorkerResponse {
+  type: 'ready' | 'error' | 'audio-chunk' | 'complete';
+  error?: string;
+  finalCodec?: 'opus' | 'aac' | 'mp3' | 'flac';
+  chunk?: EncodedAudioChunk;
+  metadata?: EncodedAudioChunkMetadata;
+}
+
+/**
+ * Message interface for communication from legacy single worker to main thread
+ * @deprecated Use VideoWorkerResponse and AudioWorkerResponse for dual-worker architecture
  */
 export interface RecorderWorkerResponse {
-  type: 'ready' | 'error' | 'file' | 'sync-update' | 'pressure';
+  type: 'ready' | 'error' | 'file' | 'sync-update' | 'pressure' | 'worker-ready-for-data' | 'video-chunk' | 'audio-chunk';
   error?: string;
   blob?: Blob;
   /** Final encoder configuration data (ground truth of what was actually used) */
@@ -105,8 +154,15 @@ export interface RecorderWorkerResponse {
   status?: 'high' | 'low';
   videoQueueSize?: number;
   audioQueueSize?: number;
+  /** 🎯 COORDINATED BACKPRESSURE: Direct encoder queue size for accurate main thread coordination */
+  encoderQueueSize?: number;
+  /** 🎯 COORDINATED BACKPRESSURE: Flag for immediate backpressure response (no hysteresis delay) */
+  immediate?: boolean;
   /** Hysteresis tracking for backpressure management */
   consecutiveCount?: number;
   backoffMultiplier?: number;
   cooldownStartTime?: number;
+  /** Dual-worker architecture: Video chunk from video worker */
+  chunk?: EncodedVideoChunk | EncodedAudioChunk;
+  metadata?: EncodedVideoChunkMetadata | EncodedAudioChunkMetadata;
 }

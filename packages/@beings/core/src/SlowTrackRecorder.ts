@@ -1,4 +1,14 @@
-import type { RecorderWorkerResponse, AudioConfig, FinalEncoderConfig, RecordingResult, SyncData } from './types';
+import type { 
+  RecorderWorkerResponse, 
+  VideoWorkerRequest, 
+  VideoWorkerResponse,
+  AudioWorkerRequest, 
+  AudioWorkerResponse,
+  AudioConfig, 
+  FinalEncoderConfig, 
+  RecordingResult, 
+  SyncData 
+} from './types';
 
 /**
  * Configuration interface for the SlowTrackRecorder
@@ -37,6 +47,22 @@ export interface RecorderEvents {
  * the "Slow Track" of our dual-track capture model, focusing on high-fidelity
  * archival recording with frame-accurate time synchronization.
  * 
+ * ## Dual-Worker Architecture (v1.1+)
+ * 
+ * This implementation uses a sophisticated dual-worker architecture to eliminate
+ * performance bottlenecks and achieve true parallel processing:
+ * 
+ * - **Main Thread (Conductor)**: Manages worker lifecycle, buffers encoded chunks,
+ *   and performs final A/V synchronization and muxing
+ * - **Video Worker**: Dedicated thread for video frame processing, encoding, and
+ *   optional downscaling operations (handles ~30fps without audio interference)
+ * - **Audio Worker**: Dedicated thread for high-frequency audio processing 
+ *   (handles 48kHz sample rates = 1000+ frames/second)
+ * 
+ * This architecture prevents resource contention where high-frequency audio
+ * processing would previously starve the video encoder, causing frame drops
+ * and A/V desynchronization.
+ * 
  * @example
  * ```typescript
  * const recorder = new SlowTrackRecorder({
@@ -56,64 +82,53 @@ export interface RecorderEvents {
 export class SlowTrackRecorder {
   #config: SlowTrackRecorderConfig;
   #listeners: Map<keyof RecorderEvents, Set<Function>> = new Map();
-  #worker: Worker | null = null;
+  
+  // Dual worker architecture
+  #videoWorker: Worker | null = null;
+  #audioWorker: Worker | null = null;
+  #isVideoWorkerReady = false;
+  #isAudioWorkerReady = false;
+  
+  // Chunk buffering for main thread muxing
+  #videoChunks: EncodedVideoChunk[] = [];
+  #audioChunks: EncodedAudioChunk[] = [];
+  #chunkMetadata = new Map<EncodedVideoChunk | EncodedAudioChunk, any>();
+  
   #isRecording = false;
-  #isWorkerReady = false;
   #stopPromiseResolve: ((blob: Blob) => void) | null = null;
   #stopPromiseReject: ((error: Error) => void) | null = null;
   #stopTimeout: number | null = null;
-  #finalCodec: 'av1' | 'hevc' | 'h264' | 'vp9' | null = null;
+  #finalVideoCodec: 'av1' | 'hevc' | 'h264' | 'vp9' | null = null;
+  #finalAudioCodec: 'opus' | 'aac' | 'mp3' | 'flac' | null = null;
   #startPromiseResolve: (() => void) | null = null;
   #startPromiseReject: ((error: Error) => void) | null = null;
   #lastResult: RecordingResult | null = null;
+  
+  /** @deprecated Use #finalVideoCodec instead */
+  #finalCodec: 'av1' | 'hevc' | 'h264' | 'vp9' | null = null;
 
-  /** Flag to signal processing loops to terminate early */
-  #shouldStopProcessing = false;
-
-  /** High-resolution monotonic timestamp of when recording started. The 'zero' point for the session. */
+  /** High-resolution monotonic timestamp of when recording started */
   #recordingStartTime: number | null = null;
 
-  /** The timestamp of the very first video frame received, used as the baseline for normalization. */
-  #firstVideoTimestamp: number | null = null;
-
-  /** The timestamp of the very first audio frame received, used as the baseline for normalization. */
-  #firstAudioTimestamp: number | null = null;
-
-  /** TransformStream for processing and timestamping video frames before sending to the worker. */
-  #videoTransformStream: TransformStream<VideoFrame, VideoFrame> | null = null;
-
-  /** TransformStream for processing and timestamping audio data before sending to the worker. */
-  #audioTransformStream: TransformStream<AudioData, AudioData> | null = null;
-
-  /** Minimal diagnostic counters */
+  /** Diagnostic counters for performance monitoring */
   #videoFrameCount = 0;
   #lastDiagnosticTime = 0;
   
-  /** Track pending normalized frames to ensure cleanup */
-  #pendingNormalizedFrames = new Set<VideoFrame>();
-  
-  /** Track original frames from MediaStreamTrackProcessor */
-  #pendingOriginalFrames = new Set<VideoFrame>();
-  
-  /** Track original audio frames from MediaStreamTrackProcessor */
-  #pendingOriginalAudioFrames = new Set<AudioData>();
-  
-  /** Event-driven backpressure control */
+  /** Video worker backpressure coordination */
   #isPumpPaused = false;
   #pressureHighTimestamp: number | null = null;
   #performanceCheckInterval: number | null = null;
   
-  /** Refined user feedback system */
+  /** User feedback system for performance warnings */
   #firstLevelWarningShown = false;
   #secondLevelWarningShown = false;
-  
-  /** Enhanced frame lifecycle tracking for diagnostics */
-  #frameLifecycleMap = new Map<VideoFrame, { type: 'original' | 'normalized', operation: string, created: number }>();
-  #maxFrameLifetime = 5000; // 5 seconds - warn about frames held longer than this
 
-  /** 🎯 SURGICAL STRIKE: Lightweight frame leak detector */
+  /** Frame leak detector for monitoring (diagnostic purposes) */
   #activeFrames = new Set<VideoFrame>();
   #leakMonitorInterval: number | null = null;
+  
+  /** Legacy compatibility flag */
+  #shouldStopProcessing = false;
 
 
 
@@ -230,9 +245,9 @@ export class SlowTrackRecorder {
   }
 
   /**
-   * Handle fatal errors in processing loops with centralized cleanup
+   * Handle fatal errors in dual-worker processing
    * 
-   * @param error - The error that occurred in a processing loop
+   * @param error - The error that occurred
    */
   #handleFatalError(error: any): void {
     // Prevent duplicate cleanup calls
@@ -240,23 +255,17 @@ export class SlowTrackRecorder {
       return;
     }
 
-    console.error('SlowTrackRecorder: Fatal error in processing loop:', error);
+    console.error('SlowTrackRecorder: Fatal error in dual-worker processing:', error);
     
     // Signal all loops to terminate
     this.#shouldStopProcessing = true;
     this.#isRecording = false;
     
-    // Comprehensive cleanup
-    if (this.#worker) {
-      this.#worker.terminate();
-      this.#worker = null;
-    }
+    // Cleanup dual workers
+    this.#cleanupDualWorkers();
     
     // Reset all state
-    this.#isWorkerReady = false;
     this.#recordingStartTime = null;
-    this.#videoTransformStream = null;
-    this.#audioTransformStream = null;
     this.#videoFrameCount = 0;
     this.#lastDiagnosticTime = 0;
     
@@ -266,125 +275,197 @@ export class SlowTrackRecorder {
   }
 
   /**
-   * Handle messages received from the worker
+   * Handle messages received from the video worker
    * 
-   * @param event - Message event from the worker
+   * @param event - Message event from the video worker
    */
-  #handleWorkerMessage(event: MessageEvent<RecorderWorkerResponse>): void {
+  #handleVideoWorkerMessage(event: MessageEvent<VideoWorkerResponse>): void {
     try {
       switch (event.data.type) {
         case 'ready':
-          this.#isWorkerReady = true;
-          this.#finalCodec = event.data.finalCodec || null;
-          console.log('SlowTrackRecorder: Worker ready with codec:', this.#finalCodec);
+          this.#isVideoWorkerReady = true;
+          this.#finalVideoCodec = event.data.finalCodec || null;
+          this.#finalCodec = this.#finalVideoCodec; // Backward compatibility
+          console.log('SlowTrackRecorder: Video worker ready with codec:', this.#finalVideoCodec);
           
-          // Resolve the start promise if pending
-          if (this.#startPromiseResolve) {
-            this.#startPromiseResolve();
-            this.#startPromiseResolve = null;
-            this.#startPromiseReject = null;
-          }
+          // Check if both workers are ready
+          this.#checkWorkersReady();
           break;
         
-        case 'file':
-          this.#handleFileMessage(event.data);
-          break;
-        
-        case 'error':
-          this.#handleWorkerError(event.data.error || 'Unknown worker error');
-          break;
-        
-        case 'sync-update':
-          if (event.data.syncData) {
-            this.#emit('sync-update', event.data.syncData);
+        case 'video-chunk':
+          if (event.data.chunk) {
+            this.#videoChunks.push(event.data.chunk);
+            if (event.data.metadata) {
+              this.#chunkMetadata.set(event.data.chunk, event.data.metadata);
+            }
+            // Log first few chunks for startup diagnostics
+            if (this.#videoChunks.length <= 3) {
+              console.log(`SlowTrackRecorder: Video chunk ${this.#videoChunks.length} received (${event.data.chunk.byteLength} bytes)`);
+            }
           }
           break;
         
         case 'pressure':
-          this.#handleBackpressureMessage(event.data);
+          this.#handleVideoBackpressureMessage(event.data);
+          break;
+        
+        case 'error':
+          this.#handleVideoWorkerError(event.data.error || 'Unknown video worker error');
+          break;
+        
+        case 'complete':
+          console.log('SlowTrackRecorder: Video worker completed');
           break;
         
         default:
-          console.warn('SlowTrackRecorder: Unknown message type from worker:', event.data);
+          console.warn('SlowTrackRecorder: Unknown message type from video worker:', event.data);
       }
     } catch (error) {
-      console.error('SlowTrackRecorder: Error handling worker message:', error);
+      console.error('SlowTrackRecorder: Error handling video worker message:', error);
     }
   }
 
   /**
-   * Handle file message from worker with final video blob
+   * Handle messages received from the audio worker
    * 
-   * @param data - Message data containing the video buffer
+   * @param event - Message event from the audio worker
    */
-  #handleFileMessage(data: RecorderWorkerResponse): void {
-    if (!data.blob) {
-      const error = new Error('No blob received in file message from worker');
-      this.#handleWorkerError(error.message);
-      return;
-    }
-
+  #handleAudioWorkerMessage(event: MessageEvent<AudioWorkerResponse>): void {
     try {
-      // Clear the timeout since we received the response
-      if (this.#stopTimeout !== null) {
-        clearTimeout(this.#stopTimeout);
-        this.#stopTimeout = null;
+      switch (event.data.type) {
+        case 'ready':
+          this.#isAudioWorkerReady = true;
+          this.#finalAudioCodec = event.data.finalCodec || null;
+          console.log('SlowTrackRecorder: Audio worker ready with codec:', this.#finalAudioCodec);
+          
+          // Check if both workers are ready
+          this.#checkWorkersReady();
+          break;
+        
+        case 'audio-chunk':
+          if (event.data.chunk) {
+            this.#audioChunks.push(event.data.chunk);
+            if (event.data.metadata) {
+              this.#chunkMetadata.set(event.data.chunk, event.data.metadata);
+            }
+            // Log first few chunks for startup diagnostics
+            if (this.#audioChunks.length <= 3) {
+              console.log(`SlowTrackRecorder: Audio chunk ${this.#audioChunks.length} received (${event.data.chunk.byteLength} bytes)`);
+            }
+          }
+          break;
+        
+        case 'error':
+          this.#handleAudioWorkerError(event.data.error || 'Unknown audio worker error');
+          break;
+        
+        case 'complete':
+          console.log('SlowTrackRecorder: Audio worker completed');
+          break;
+        
+        default:
+          console.warn('SlowTrackRecorder: Unknown message type from audio worker:', event.data);
       }
-
-      // Use the blob directly from the worker (no conversion needed)
-      const videoBlob = data.blob;
-      
-      // Store comprehensive recording result for post-recording analysis
-      this.#lastResult = {
-        blob: videoBlob,
-        requestedConfig: { ...this.#config }, // Deep copy of the original config
-        finalConfig: data.finalConfig // May be undefined if worker crashed
-      };
-      
-      console.log('SlowTrackRecorder: Recording result stored:', {
-        blobSize: videoBlob.size,
-        hasFinalConfig: !!data.finalConfig,
-        requestedCodec: this.#config.codecSelection,
-        finalCodec: data.finalConfig?.video.codec
-      });
-
-      // Resolve the stop promise with the video blob
-      if (this.#stopPromiseResolve) {
-        this.#stopPromiseResolve(videoBlob);
-        this.#emit('stop', videoBlob);
-      }
-
-      // Cleanup worker and reset state
-      this.#cleanupStopOperation();
-
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.#handleWorkerError(`Failed to process video file: ${errorMessage}`);
+      console.error('SlowTrackRecorder: Error handling audio worker message:', error);
     }
   }
 
   /**
-   * Handle backpressure messages from worker for event-driven flow control
-   * 
-   * @param data - Backpressure message data from worker
+   * Check if both workers are ready and resolve start promise
    */
-  #handleBackpressureMessage(data: RecorderWorkerResponse): void {
+  #checkWorkersReady(): void {
+    const audioEnabled = this.#config.audio?.enabled === true;
+    const bothReady = this.#isVideoWorkerReady && (!audioEnabled || this.#isAudioWorkerReady);
+    
+    if (bothReady && this.#startPromiseResolve) {
+      console.log('SlowTrackRecorder: Both workers ready, starting recording');
+      this.#startPromiseResolve();
+      this.#startPromiseResolve = null;
+      this.#startPromiseReject = null;
+    }
+  }
+
+
+
+
+
+  /**
+   * Handle backpressure messages from video worker
+   * 
+   * @param data - Backpressure message data from video worker
+   */
+  #handleVideoBackpressureMessage(data: VideoWorkerResponse): void {
+    const encoderQueue = data.queueSize || 0;
+    const isImmediate = data.immediate || false;
+    
     if (data.status === 'high') {
-      const hysteresisInfo = data.consecutiveCount ? ` (attempt ${data.consecutiveCount}, backoff ${data.backoffMultiplier}x)` : '';
-      console.warn(`SlowTrackRecorder: Worker backpressure HIGH${hysteresisInfo}, pausing SYNCHRONIZED A/V pumps (video queue: ${data.videoQueueSize}, audio queue: ${data.audioQueueSize})`);
+      const hysteresisInfo = data.consecutiveCount ? ` (attempt ${data.consecutiveCount})` : '';
+      const immediateInfo = isImmediate ? ' [IMMEDIATE]' : '';
+      console.warn(`SlowTrackRecorder: Video encoder backpressure HIGH${hysteresisInfo}${immediateInfo} (queue: ${encoderQueue})`);
+      
       this.#isPumpPaused = true;
       if (this.#pressureHighTimestamp === null) {
         this.#pressureHighTimestamp = performance.now();
-        // Start monitoring for prolonged backpressure
         this.#startPerformanceMonitoring();
       }
+      
+      if (isImmediate) {
+        console.warn(`SlowTrackRecorder: 🚨 IMMEDIATE video encoder overload detected`);
+      }
     } else if (data.status === 'low') {
-      console.log(`SlowTrackRecorder: Worker backpressure LOW, resuming SYNCHRONIZED A/V pumps (video queue: ${data.videoQueueSize}, audio queue: ${data.audioQueueSize}) - hysteresis cooldown active`);
+      const immediateInfo = isImmediate ? ' [IMMEDIATE]' : '';
+      console.log(`SlowTrackRecorder: Video encoder backpressure LOW${immediateInfo} (queue: ${encoderQueue})`);
+      
       this.#isPumpPaused = false;
       this.#pressureHighTimestamp = null;
-      // Stop performance monitoring when backpressure is resolved
       this.#stopPerformanceMonitoring();
+      
+      if (isImmediate) {
+        console.log(`SlowTrackRecorder: ✅ IMMEDIATE video encoder recovery detected`);
+      }
     }
+  }
+
+  /**
+   * Handle error messages from video worker
+   */
+  #handleVideoWorkerError(errorMessage: string): void {
+    const error = new Error(`Video worker error: ${errorMessage}`);
+    console.error('SlowTrackRecorder: Video worker error:', errorMessage);
+    
+    if (this.#startPromiseReject) {
+      this.#startPromiseReject(error);
+      this.#startPromiseResolve = null;
+      this.#startPromiseReject = null;
+    }
+    
+    if (this.#stopPromiseReject) {
+      this.#stopPromiseReject(error);
+    }
+    
+    this.#emit('error', error);
+    this.#cleanupDualWorkers();
+  }
+
+  /**
+   * Handle error messages from audio worker
+   */
+  #handleAudioWorkerError(errorMessage: string): void {
+    const error = new Error(`Audio worker error: ${errorMessage}`);
+    console.error('SlowTrackRecorder: Audio worker error:', errorMessage);
+    
+    // Audio errors are less critical - disable audio and continue with video-only
+    console.warn('SlowTrackRecorder: Disabling audio due to worker error, continuing with video-only recording');
+    
+    if (this.#audioWorker) {
+      this.#audioWorker.terminate();
+      this.#audioWorker = null;
+    }
+    this.#isAudioWorkerReady = false;
+    
+    // Check if video worker is ready to continue
+    this.#checkWorkersReady();
   }
 
   /**
@@ -506,62 +587,16 @@ export class SlowTrackRecorder {
     this.#activeFrames.clear();
   }
 
-  /**
-   * Track frame lifecycle for enhanced diagnostics and leak detection
-   * 
-   * @param frame - VideoFrame to track
-   * @param type - Type of frame ('original' from stream or 'normalized' for worker)
-   * @param operation - Description of the operation being performed
-   */
-  #trackFrameLifecycle(frame: VideoFrame, type: 'original' | 'normalized', operation: string): void {
-    const frameInfo = {
-      type,
-      operation,
-      created: performance.now()
-    };
-    
-    // Track for debugging and cleanup
-    this.#frameLifecycleMap.set(frame, frameInfo);
-    
-    if (type === 'original') {
-      this.#pendingOriginalFrames.add(frame);
-    } else {
-      this.#pendingNormalizedFrames.add(frame);
-    }
-    
-    // Debug: Warn about frames held too long (potential leak detection)
-    setTimeout(() => {
-      if (this.#frameLifecycleMap.has(frame)) {
-        const info = this.#frameLifecycleMap.get(frame)!;
-        const lifetime = performance.now() - info.created;
-        console.warn(`SlowTrackRecorder: Frame held for ${Math.round(lifetime)}ms, potential leak:`, {
-          type: info.type,
-          operation: info.operation,
-          timestamp: frame.timestamp,
-          lifetime: `${Math.round(lifetime)}ms`
-        });
-      }
-    }, this.#maxFrameLifetime);
-  }
+
 
   /**
-   * Untrack frame when it's properly cleaned up
-   * 
-   * @param frame - VideoFrame to remove from tracking
-   */
-  #untrackFrameLifecycle(frame: VideoFrame): void {
-    this.#frameLifecycleMap.delete(frame);
-    this.#pendingOriginalFrames.delete(frame);
-    this.#pendingNormalizedFrames.delete(frame);
-  }
-
-  /**
-   * Handle error messages from worker
+   * Handle error messages from legacy single worker (deprecated)
+   * @deprecated Use #handleVideoWorkerError and #handleAudioWorkerError instead
    * 
    * @param errorMessage - Error message from worker
    */
   #handleWorkerError(errorMessage: string): void {
-    const error = new Error(`Worker error: ${errorMessage}`);
+    const error = new Error(`Legacy worker error: ${errorMessage}`);
     
     // If we have a pending start operation, reject it
     if (this.#startPromiseReject) {
@@ -583,24 +618,30 @@ export class SlowTrackRecorder {
   }
 
   /**
-   * Start recording from the provided MediaStream
+   * Start recording from the provided MediaStream using dual-worker architecture
    * 
    * @param stream - MediaStream to record (typically from getUserMedia or getDisplayMedia)
    * @returns Promise that resolves when recording has started
    */
   async start(stream: MediaStream): Promise<void> {
     try {
-      // 1. Validate State & Set Timebase
+      // 1. Validate State & Setup
       if (this.#isRecording) {
         throw new Error('Recording already in progress');
       }
+      
       this.#lastResult = null;
-      this.#shouldStopProcessing = false; // Reset processing flag for new recording
+      this.#shouldStopProcessing = false;
       this.#videoFrameCount = 0;
       this.#lastDiagnosticTime = 0;
       this.#recordingStartTime = performance.now();
       
-      // Reset backpressure state for new recording
+      // Clear chunk buffers
+      this.#videoChunks = [];
+      this.#audioChunks = [];
+      this.#chunkMetadata.clear();
+      
+      // Reset backpressure state
       this.#isPumpPaused = false;
       this.#pressureHighTimestamp = null;
       this.#stopPerformanceMonitoring();
@@ -608,296 +649,452 @@ export class SlowTrackRecorder {
       // Reset user feedback state
       this.#firstLevelWarningShown = false;
       this.#secondLevelWarningShown = false;
+      
+      console.log('SlowTrackRecorder: 🚀 Starting dual-worker architecture');
 
-      // Leak monitoring disabled for performance testing
-      // this.#startLeakMonitoring();
-
-      // 2. Extract Tracks and Get ACTUAL Settings
+      // 2. Extract and Validate Tracks
       const videoTrack = stream.getVideoTracks()[0];
       const audioTrack = stream.getAudioTracks()[0];
       if (!videoTrack) {
         throw new Error('No video tracks found in the provided MediaStream');
       }
 
-      // 🎯 CRITICAL FIX: Extract actual track settings for configuration matching
       const videoSettings = videoTrack.getSettings();
-      console.log('SlowTrackRecorder: 🔍 ACTUAL Video Track Settings:', {
+      const audioEnabled = this.#config.audio?.enabled === true && !!audioTrack;
+      let audioSettings: MediaTrackSettings | null = null;
+      
+      console.log('SlowTrackRecorder: 🔍 Video Track Settings:', {
         width: videoSettings.width,
         height: videoSettings.height,
-        frameRate: videoSettings.frameRate,
-        aspectRatio: videoSettings.aspectRatio,
-        facingMode: videoSettings.facingMode
-      });
-      
-      console.log('SlowTrackRecorder: 📋 REQUESTED Video Config:', {
-        width: this.#config.width,
-        height: this.#config.height,
-        frameRate: this.#config.frameRate
+        frameRate: videoSettings.frameRate
       });
 
-      // 🚨 CONFIGURATION MISMATCH DETECTION #1: Video Dimensions
-      if (videoSettings.width !== this.#config.width || videoSettings.height !== this.#config.height) {
-        console.warn('SlowTrackRecorder: ⚠️ VIDEO DIMENSION MISMATCH DETECTED!', {
-          actualWidth: videoSettings.width,
-          requestedWidth: this.#config.width,
-          actualHeight: videoSettings.height,
-          requestedHeight: this.#config.height
-        });
-      }
-
-      // 🚨 CONFIGURATION MISMATCH DETECTION #2: Frame Rate
-      if (videoSettings.frameRate && Math.abs(videoSettings.frameRate - this.#config.frameRate) > 1) {
-        console.warn('SlowTrackRecorder: ⚠️ VIDEO FRAME RATE MISMATCH DETECTED!', {
-          actualFrameRate: videoSettings.frameRate,
-          requestedFrameRate: this.#config.frameRate
-        });
-      }
-
-      const audioEnabled = this.#config.audio?.enabled === true && !!audioTrack;
-      
-      let audioSettings: MediaTrackSettings | null = null;
-      if (audioTrack && audioEnabled) {
+      if (audioEnabled && audioTrack) {
         audioSettings = audioTrack.getSettings();
-        console.log('SlowTrackRecorder: 🔍 ACTUAL Audio Track Settings:', {
+        console.log('SlowTrackRecorder: 🔍 Audio Track Settings:', {
           sampleRate: audioSettings.sampleRate,
-          channelCount: audioSettings.channelCount,
-          sampleSize: audioSettings.sampleSize,
-          echoCancellation: audioSettings.echoCancellation,
-          noiseSuppression: audioSettings.noiseSuppression,
-          autoGainControl: audioSettings.autoGainControl
+          channelCount: audioSettings.channelCount
         });
-        
-        console.log('SlowTrackRecorder: 📋 REQUESTED Audio Config:', {
-          sampleRate: this.#config.audio?.sampleRate,
-          numberOfChannels: this.#config.audio?.numberOfChannels,
-          codec: this.#config.audio?.codec,
-          bitrate: this.#config.audio?.bitrate
-        });
-
-        // 🚨 CONFIGURATION MISMATCH DETECTION #3: Audio Sample Rate
-        if (audioSettings.sampleRate && this.#config.audio && 
-            audioSettings.sampleRate !== this.#config.audio.sampleRate) {
-          console.error('SlowTrackRecorder: 🚨 CRITICAL AUDIO SAMPLE RATE MISMATCH!', {
-            actualSampleRate: audioSettings.sampleRate,
-            requestedSampleRate: this.#config.audio.sampleRate,
-            message: 'This WILL cause A/V sync issues and encoding failures!'
-          });
-        }
-
-        // 🚨 CONFIGURATION MISMATCH DETECTION #4: Audio Channel Count
-        if (audioSettings.channelCount && this.#config.audio && 
-            audioSettings.channelCount !== this.#config.audio.numberOfChannels) {
-          console.warn('SlowTrackRecorder: ⚠️ AUDIO CHANNEL COUNT MISMATCH DETECTED!', {
-            actualChannelCount: audioSettings.channelCount,
-            requestedChannelCount: this.#config.audio.numberOfChannels,
-            message: 'Upmixing/downmixing may be required'
-          });
-        }
       }
 
-      if (this.#config.audio?.enabled && !audioTrack) {
-        console.warn('SlowTrackRecorder: Audio enabled in config but no audio track found in stream. Proceeding with video-only recording.');
-      }
-
-      // 3. Initialize Worker
-      this.#worker = new Worker(
-        new URL('./recorder.worker.ts', import.meta.url),
+      // 3. Create and Setup Video Worker
+      console.log('SlowTrackRecorder: Creating video worker...');
+      this.#videoWorker = new Worker(
+        new URL('./video.worker.ts', import.meta.url),
         { type: 'module' }
       );
-      this.#worker.onmessage = this.#handleWorkerMessage.bind(this);
+      this.#videoWorker.onmessage = (event) => this.#handleVideoWorkerMessage(event);
 
-      // 4. Create Direct Processing Pipeline (TransformStream removed)
-      // 🎯 RACE CONDITION FIX: Clone video track to prevent premature termination
-      const clonedVideoTrack = videoTrack.clone();
-      const videoProcessor = new MediaStreamTrackProcessor({ track: clonedVideoTrack } as MediaStreamTrackProcessorInit);
-      
-      console.log('SlowTrackRecorder: 🎬 Created direct MediaStreamTrackProcessor pipeline (no TransformStream)');
-
-      // 🎯 DIRECT PIPELINE: Create transform stream just for worker transfer (no processing)
-      this.#videoTransformStream = new TransformStream<VideoFrame, VideoFrame>();
-      const videoReader = videoProcessor.readable.getReader();
-      const videoWriter = this.#videoTransformStream.writable.getWriter();
-
-      const processingPromises: Promise<void>[] = [
-        this.#processVideoStreamDirect(videoReader, videoWriter)
-      ];
-
-      let audioStreamForWorker: ReadableStream<AudioData> | undefined;
-
-      if (audioEnabled) {
-        this.#audioTransformStream = new TransformStream<AudioData, AudioData>(undefined, undefined, {
-          highWaterMark: 500, // Increased buffer for audio to prevent throttling
-          size: () => 1
-        });
-        // 🎯 RACE CONDITION FIX: Clone audio track for consistency
-        const clonedAudioTrack = audioTrack.clone();
-        const audioProcessor = new MediaStreamTrackProcessor({ track: clonedAudioTrack } as MediaStreamTrackProcessorInit);
-        const audioReader = audioProcessor.readable.getReader();
-        const audioWriter = this.#audioTransformStream.writable.getWriter();
-        
-        console.log('SlowTrackRecorder: 🎵 Created MediaStreamTrackProcessor with cloned audio track');
-        processingPromises.push(this.#processAudioStream(audioReader, audioWriter));
-        audioStreamForWorker = this.#audioTransformStream.readable;
+      // 4. Create and Setup Audio Worker (if audio enabled)
+      if (audioEnabled && audioTrack) {
+        console.log('SlowTrackRecorder: Creating audio worker...');
+        this.#audioWorker = new Worker(
+          new URL('./audio.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        this.#audioWorker.onmessage = (event) => this.#handleAudioWorkerMessage(event);
       }
 
-      // Launch the processing loops in the background with debugging
-      console.log(`SlowTrackRecorder: 🚀 Starting ${processingPromises.length} processing loops`);
-      Promise.all(processingPromises).then(() => {
-        console.log('SlowTrackRecorder: ✅ All processing loops completed normally');
-      }).catch(error => {
-        console.error('SlowTrackRecorder: 🚨 Processing loop error:', error);
-        this.#handleFatalError(error);
-      });
-
-      // 5. Post Message to Worker (REVERTED to stream-based)
-      const message = {
-        type: 'start' as const,
-        config: {
-          ...this.#config,
-          // Use actual track settings for perfect configuration matching
-          width: videoSettings.width || this.#config.width,
-          height: videoSettings.height || this.#config.height,
-          frameRate: videoSettings.frameRate || this.#config.frameRate,
-          audio: audioEnabled && audioSettings && this.#config.audio ? {
-            ...this.#config.audio,
-            sampleRate: audioSettings.sampleRate || this.#config.audio.sampleRate,
-            numberOfChannels: audioSettings.channelCount || this.#config.audio.numberOfChannels
-          } as AudioConfig : this.#config.audio
-        },
-        stream: this.#videoTransformStream.readable,
-        audioStream: audioStreamForWorker,
-        actualVideoSettings: videoSettings,
-        actualAudioSettings: audioSettings
+      // 5. Create MediaStreamTrackProcessors and Send Streams to Workers
+      const baseConfig = {
+        ...this.#config,
+        width: videoSettings.width || this.#config.width,
+        height: videoSettings.height || this.#config.height,
+        frameRate: videoSettings.frameRate || this.#config.frameRate,
       };
 
-      const transferables: Transferable[] = [this.#videoTransformStream.readable];
-      if (audioStreamForWorker) {
-        transferables.push(audioStreamForWorker);
-      }
-      this.#worker.postMessage(message, transferables);
+      // Create video stream for worker
+      const clonedVideoTrack = videoTrack.clone();
+      const videoProcessor = new MediaStreamTrackProcessor({ track: clonedVideoTrack } as MediaStreamTrackProcessorInit);
+      const videoStream = videoProcessor.readable;
+      
+      // Send video configuration to video worker
+      const videoMessage: VideoWorkerRequest = {
+        type: 'start',
+        config: baseConfig,
+        videoStream: videoStream,
+        actualVideoSettings: videoSettings
+      };
+      
+      console.log('SlowTrackRecorder: Sending video stream to video worker');
+      this.#videoWorker.postMessage(videoMessage, [videoStream]);
 
-      // 6. Await Worker Readiness
+      // Send audio configuration to audio worker (if enabled)
+      if (audioEnabled && audioTrack && this.#audioWorker && audioSettings) {
+        const clonedAudioTrack = audioTrack.clone();
+        const audioProcessor = new MediaStreamTrackProcessor({ track: clonedAudioTrack } as MediaStreamTrackProcessorInit);
+        const audioStream = audioProcessor.readable;
+        
+        const audioConfig = {
+          ...baseConfig,
+          audio: {
+            ...this.#config.audio!,
+            sampleRate: (audioSettings.sampleRate || this.#config.audio!.sampleRate) as 48000 | 44100 | 32000 | 16000,
+            numberOfChannels: (audioSettings.channelCount || this.#config.audio!.numberOfChannels) as 1 | 2
+          }
+        };
+
+        const audioMessage: AudioWorkerRequest = {
+          type: 'start',
+          config: audioConfig,
+          audioStream: audioStream,
+          actualAudioSettings: audioSettings
+        };
+        
+        console.log('SlowTrackRecorder: Sending audio stream to audio worker');
+        this.#audioWorker.postMessage(audioMessage, [audioStream]);
+      }
+
+      // 6. Wait for Workers to be Ready
+      console.log('SlowTrackRecorder: Waiting for workers to be ready...');
       await new Promise<void>((resolve, reject) => {
         this.#startPromiseResolve = resolve;
         this.#startPromiseReject = reject;
+        
+        // Timeout if workers don't respond
         setTimeout(() => {
           if (this.#startPromiseReject) {
-            this.#startPromiseReject(new Error('Worker initialization timeout after 10 seconds'));
+            this.#startPromiseReject(new Error('Worker initialization timeout after 15 seconds'));
             this.#startPromiseResolve = null;
             this.#startPromiseReject = null;
           }
-        }, 10000);
+        }, 15000);
       });
 
-      // 7. Finalize State
+      // 7. Finalize Recording State
       this.#isRecording = true;
+      
+      console.log('SlowTrackRecorder: 🎬 Dual-worker recording started successfully');
+      console.log(`SlowTrackRecorder: Video codec: ${this.#finalVideoCodec}, Audio codec: ${this.#finalAudioCodec}`);
+      
+      if (audioEnabled) {
+        console.log('🎬 SlowTrackRecorder: A/V recording session initiated with dual workers');
+      } else {
+        console.log('🎬 SlowTrackRecorder: Video-only recording session initiated');
+      }
+      
       this.#emit('start');
 
     } catch (error) {
       // 8. Comprehensive Cleanup on Error
-      if (this.#worker) {
-        this.#worker.terminate();
-        this.#worker = null;
-      }
+      console.error('SlowTrackRecorder: Error in dual-worker start:', error);
+      
+      this.#cleanupDualWorkers();
       this.#isRecording = false;
       this.#shouldStopProcessing = false;
       this.#recordingStartTime = null;
-      this.#videoTransformStream = null;
-      this.#audioTransformStream = null;
       this.#stopPerformanceMonitoring();
 
       this.#emit('error', error instanceof Error ? error : new Error(String(error)));
-      throw error; // Re-throw to caller
+      throw error;
     }
   }
 
   /**
-   * Stop recording and return the final video file
+   * Stop recording and return the final video file using dual-worker architecture
    * 
    * @returns Promise that resolves with the recorded video as a Blob
    */
   async stop(): Promise<Blob> {
-    // Signal processing loops to terminate gracefully first
-    this.#shouldStopProcessing = true;
+    console.log('🎬 SlowTrackRecorder: Dual-worker recording session ending');
     
-    // Clean up any pending normalized frames that haven't been processed
-    console.log(`SlowTrackRecorder: Cleaning up ${this.#pendingNormalizedFrames.size} pending normalized frames, ${this.#pendingOriginalFrames.size} original video frames, and ${this.#pendingOriginalAudioFrames.size} original audio frames`);
-    
-    for (const frame of this.#pendingNormalizedFrames) {
-      try {
-        frame.close();
-      } catch (closeError) {
-        // Frame might have been closed already, ignore
-      }
-    }
-    this.#pendingNormalizedFrames.clear();
-    
-    // Clean up any pending original video frames
-    for (const frame of this.#pendingOriginalFrames) {
-      try {
-        frame.close();
-      } catch (closeError) {
-        // Frame might have been closed already, ignore
-      }
-    }
-    this.#pendingOriginalFrames.clear();
-    
-    // Clear frame lifecycle tracking
-    this.#frameLifecycleMap.clear();
-    
-    // Clean up any pending original audio frames
-    for (const frame of this.#pendingOriginalAudioFrames) {
-      try {
-        frame.close();
-      } catch (closeError) {
-        // Frame might have been closed already, ignore
-      }
-    }
-    this.#pendingOriginalAudioFrames.clear();
-    
-    // Additional cleanup: Force garbage collection after a short delay
-    setTimeout(() => {
-      try {
-        // @ts-ignore - gc() is available in Node.js with --expose-gc flag
-        if (typeof gc !== 'undefined') {
-          // @ts-ignore
-          gc();
-          console.log('SlowTrackRecorder: Forced garbage collection after cleanup');
-        }
-      } catch (gcError) {
-        // gc() not available, ignore
-      }
-    }, 100);
-    
-    // Idempotency Check: Prevent multiple stop calls
+    // Idempotency Check
     if (!this.#isRecording) {
       throw new Error('Recording is not currently active');
     }
 
-    // State Change: Mark as no longer recording
+    // State Change
     this.#isRecording = false;
 
-    // Promise Creation: Create promise for async file return
     return new Promise<Blob>((resolve, reject) => {
       this.#stopPromiseResolve = resolve;
       this.#stopPromiseReject = reject;
 
-      // Timeout: Ensure we don't wait forever for worker response
+      // Timeout protection
       this.#stopTimeout = window.setTimeout(() => {
-        const timeoutError = new Error('Recording stop operation timed out');
+        const timeoutError = new Error('Dual-worker stop operation timed out after 20 seconds');
         this.#cleanupStopOperation();
         reject(timeoutError);
         this.#emit('error', timeoutError);
-      }, 10000); // 10 second timeout
+      }, 20000); // Longer timeout for dual-worker coordination
 
-      // Send Stop Command: Tell worker to finalize recording
-      if (this.#worker) {
-        this.#worker.postMessage({ type: 'stop' });
-      } else {
-        this.#cleanupStopOperation();
-        reject(new Error('Worker not available for stop operation'));
-      }
+      this.#stopDualWorkers().then(resolve).catch(reject);
     });
+  }
+
+  /**
+   * Coordinate stopping both workers and perform main thread muxing
+   */
+  async #stopDualWorkers(): Promise<Blob> {
+    try {
+      console.log('SlowTrackRecorder: Coordinating dual-worker stop operation');
+      
+      const stopPromises: Promise<void>[] = [];
+      
+      // Send stop command to video worker
+      if (this.#videoWorker) {
+        console.log('SlowTrackRecorder: Stopping video worker...');
+        const videoStopPromise = new Promise<void>((resolve) => {
+          const originalHandler = this.#videoWorker!.onmessage;
+          this.#videoWorker!.onmessage = (event: MessageEvent<VideoWorkerResponse>) => {
+            if (event.data.type === 'complete') {
+              console.log('SlowTrackRecorder: Video worker stopped');
+              this.#videoWorker!.onmessage = originalHandler;
+              resolve();
+            } else if (originalHandler) {
+              originalHandler.call(this.#videoWorker!, event);
+            }
+          };
+        });
+        this.#videoWorker.postMessage({ type: 'stop' });
+        stopPromises.push(videoStopPromise);
+      }
+
+      // Send stop command to audio worker (if exists)
+      if (this.#audioWorker) {
+        console.log('SlowTrackRecorder: Stopping audio worker...');
+        const audioStopPromise = new Promise<void>((resolve) => {
+          const originalHandler = this.#audioWorker!.onmessage;
+          this.#audioWorker!.onmessage = (event: MessageEvent<AudioWorkerResponse>) => {
+            if (event.data.type === 'complete') {
+              console.log('SlowTrackRecorder: Audio worker stopped');
+              this.#audioWorker!.onmessage = originalHandler;
+              resolve();
+            } else if (originalHandler) {
+              originalHandler.call(this.#audioWorker!, event);
+            }
+          };
+        });
+        this.#audioWorker.postMessage({ type: 'stop' });
+        stopPromises.push(audioStopPromise);
+      }
+
+      // Wait for both workers to complete
+      console.log(`SlowTrackRecorder: Waiting for ${stopPromises.length} workers to complete...`);
+      await Promise.all(stopPromises);
+      
+      console.log('SlowTrackRecorder: All workers completed, starting main thread muxing');
+      console.log(`SlowTrackRecorder: Collected ${this.#videoChunks.length} video chunks, ${this.#audioChunks.length} audio chunks`);
+
+      // Perform main thread muxing
+      const finalBlob = await this.#performMainThreadMuxing();
+      
+      // Clear timeout since we completed successfully
+      if (this.#stopTimeout !== null) {
+        clearTimeout(this.#stopTimeout);
+        this.#stopTimeout = null;
+      }
+
+      // Store result for analysis
+      this.#lastResult = {
+        blob: finalBlob,
+        requestedConfig: { ...this.#config },
+        finalConfig: this.#createFinalConfig()
+      };
+
+      // Cleanup and emit success
+      this.#cleanupStopOperation();
+      this.#emit('stop', finalBlob);
+      
+      return finalBlob;
+
+    } catch (error) {
+      console.error('SlowTrackRecorder: Error in dual-worker stop operation:', error);
+      this.#cleanupStopOperation();
+      const stopError = error instanceof Error ? error : new Error(String(error));
+      this.#emit('error', stopError);
+      throw stopError;
+    }
+  }
+
+  /**
+   * Perform muxing on the main thread using collected chunks
+   */
+  async #performMainThreadMuxing(): Promise<Blob> {
+    try {
+      // Determine container type based on video codec
+      const containerType: 'mp4' | 'webm' = (this.#finalVideoCodec === 'av1' || this.#finalVideoCodec === 'vp9') ? 'webm' : 'mp4';
+      console.log(`SlowTrackRecorder: Creating ${containerType.toUpperCase()} container for ${this.#finalVideoCodec} video codec`);
+
+      // Combine and sort all chunks by timestamp for A/V sync
+      const allChunks: Array<{chunk: EncodedVideoChunk | EncodedAudioChunk, type: 'video' | 'audio', timestamp: number}> = [];
+      
+      // Add video chunks
+      this.#videoChunks.forEach(chunk => {
+        allChunks.push({ chunk, type: 'video', timestamp: chunk.timestamp });
+      });
+      
+      // Add audio chunks
+      this.#audioChunks.forEach(chunk => {
+        allChunks.push({ chunk, type: 'audio', timestamp: chunk.timestamp });
+      });
+
+      // Sort by timestamp to maintain A/V synchronization
+      allChunks.sort((a, b) => a.timestamp - b.timestamp);
+      console.log(`SlowTrackRecorder: Sorted ${allChunks.length} total chunks by timestamp for A/V sync`);
+
+      let finalBlob: Blob;
+
+      if (containerType === 'mp4') {
+        // Use mp4-muxer for H.264/HEVC
+        const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
+        const target = new ArrayBufferTarget();
+        
+        const muxerConfig: any = {
+          target,
+          video: {
+            codec: this.#finalVideoCodec === 'hevc' ? 'hevc' : 'avc',
+            width: this.#config.width,
+            height: this.#config.height
+          },
+          fastStart: 'fragmented',
+          firstTimestampBehavior: 'offset'
+        };
+
+        // Add audio track if we have audio chunks
+        if (this.#audioChunks.length > 0 && this.#finalAudioCodec) {
+          muxerConfig.audio = {
+            codec: 'aac', // MP4 containers use AAC
+            sampleRate: this.#config.audio?.sampleRate || 48000,
+            numberOfChannels: this.#config.audio?.numberOfChannels || 2
+          };
+        }
+
+        const muxer = new Muxer(muxerConfig);
+        console.log('SlowTrackRecorder: Created MP4 muxer with config:', muxerConfig);
+
+        // Add chunks in timestamp order
+        for (const { chunk, type } of allChunks) {
+          const metadata = this.#chunkMetadata.get(chunk) || {};
+          if (type === 'video') {
+            muxer.addVideoChunk(chunk as EncodedVideoChunk, metadata);
+          } else {
+            muxer.addAudioChunk(chunk as EncodedAudioChunk, metadata);
+          }
+        }
+
+        muxer.finalize();
+        finalBlob = new Blob([target.buffer], { type: 'video/mp4' });
+        console.log(`SlowTrackRecorder: Created MP4 blob, size: ${finalBlob.size} bytes`);
+
+      } else {
+        // Use webm-muxer for AV1/VP9
+        const WebMMuxer = (await import('webm-muxer')).default;
+        const muxedChunks: Uint8Array[] = [];
+        
+        const muxerConfig: any = {
+          target: (data: Uint8Array) => {
+            muxedChunks.push(data);
+          },
+          video: {
+            codec: this.#finalVideoCodec === 'av1' ? 'V_AV01' : 'V_VP9',
+            width: this.#config.width,
+            height: this.#config.height
+          },
+          firstTimestampBehavior: 'offset'
+        };
+
+        // Add audio track if we have audio chunks
+        if (this.#audioChunks.length > 0 && this.#finalAudioCodec) {
+          const audioCodecMap: Record<string, string> = {
+            'opus': 'A_OPUS',
+            'flac': 'A_FLAC'
+          };
+          muxerConfig.audio = {
+            codec: audioCodecMap[this.#finalAudioCodec] || 'A_OPUS',
+            sampleRate: this.#config.audio?.sampleRate || 48000,
+            numberOfChannels: this.#config.audio?.numberOfChannels || 2
+          };
+        }
+
+        const muxer = new WebMMuxer(muxerConfig);
+        console.log('SlowTrackRecorder: Created WebM muxer with config:', muxerConfig);
+
+        // Add chunks in timestamp order
+        for (const { chunk, type } of allChunks) {
+          const metadata = this.#chunkMetadata.get(chunk) || {};
+          if (type === 'video') {
+            muxer.addVideoChunk(chunk as EncodedVideoChunk, metadata);
+          } else {
+            muxer.addAudioChunk(chunk as EncodedAudioChunk, metadata);
+          }
+        }
+
+        muxer.finalize();
+        finalBlob = new Blob(muxedChunks as BlobPart[], { type: 'video/webm' });
+        console.log(`SlowTrackRecorder: Created WebM blob, size: ${finalBlob.size} bytes`);
+      }
+
+      return finalBlob;
+
+    } catch (error) {
+      console.error('SlowTrackRecorder: Error in main thread muxing:', error);
+      throw new Error(`Main thread muxing failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Create final configuration object for result analysis
+   */
+  #createFinalConfig(): FinalEncoderConfig | undefined {
+    if (!this.#finalVideoCodec) {
+      return undefined;
+    }
+
+    const containerType: 'mp4' | 'webm' = (this.#finalVideoCodec === 'av1' || this.#finalVideoCodec === 'vp9') ? 'webm' : 'mp4';
+    const recordingDuration = this.#recordingStartTime ? (performance.now() - this.#recordingStartTime) : 0;
+
+    return {
+      video: {
+        codec: this.#finalVideoCodec,
+        width: this.#config.width,
+        height: this.#config.height,
+        bitrate: this.#config.bitrate,
+        framerate: this.#config.frameRate,
+        hardwareAccelerationUsed: this.#config.hardwareAcceleration === 'prefer-hardware'
+      },
+      audio: this.#finalAudioCodec ? {
+        codec: this.#finalAudioCodec,
+        sampleRate: this.#config.audio?.sampleRate || 48000,
+        numberOfChannels: this.#config.audio?.numberOfChannels || 2,
+        bitrate: this.#config.audio?.bitrate || 128000
+      } : undefined,
+      container: containerType,
+      duration: recordingDuration
+    };
+  }
+
+  /**
+   * Clean up dual workers and resources
+   */
+  #cleanupDualWorkers(): void {
+    // Terminate video worker
+    if (this.#videoWorker) {
+      this.#videoWorker.terminate();
+      this.#videoWorker = null;
+    }
+    
+    // Terminate audio worker
+    if (this.#audioWorker) {
+      this.#audioWorker.terminate();
+      this.#audioWorker = null;
+    }
+    
+    // Reset worker state
+    this.#isVideoWorkerReady = false;
+    this.#isAudioWorkerReady = false;
+    
+    // Clear chunk buffers
+    this.#videoChunks = [];
+    this.#audioChunks = [];
+    this.#chunkMetadata.clear();
+    
+    // Reset codec state
+    this.#finalVideoCodec = null;
+    this.#finalAudioCodec = null;
+    this.#finalCodec = null;
+    
+    console.log('SlowTrackRecorder: Dual workers cleaned up');
   }
 
   /**
@@ -914,20 +1111,16 @@ export class SlowTrackRecorder {
     this.#stopPromiseResolve = null;
     this.#stopPromiseReject = null;
 
-    // Terminate and cleanup worker
-    if (this.#worker) {
-      this.#worker.terminate();
-      this.#worker = null;
-    }
+    // Cleanup dual workers
+    this.#cleanupDualWorkers();
 
     // Reset state
-    this.#isWorkerReady = false;
     this.#shouldStopProcessing = false;
     this.#isPumpPaused = false;
     this.#pressureHighTimestamp = null;
     this.#stopPerformanceMonitoring();
     
-    // 🎯 SURGICAL STRIKE: Stop leak monitoring and cleanup
+    // Stop leak monitoring and cleanup
     this.#stopLeakMonitoring();
   }
 
@@ -966,446 +1159,15 @@ export class SlowTrackRecorder {
    * @returns The codec that is actually being used ('av1', 'hevc', 'h264', 'vp9', or null if not determined)
    */
   getFinalCodec(): 'av1' | 'hevc' | 'h264' | 'vp9' | null {
-    return this.#finalCodec;
+    // Maintain backward compatibility by returning video codec
+    return this.#finalVideoCodec || this.#finalCodec;
   }
 
-  /**
-   * 🎯 DIRECT PIPELINE: Processes video frames directly from MediaStreamTrackProcessor
-   * Eliminates TransformStream bottleneck for maximum performance
-   * @param reader - Direct reader from MediaStreamTrackProcessor
-   */
-  async #processVideoStreamDirect(
-    reader: ReadableStreamDefaultReader<VideoFrame>,
-    writer: WritableStreamDefaultWriter<VideoFrame>
-  ): Promise<void> {
-    try {
-      console.log('SlowTrackRecorder: 🎬 Direct video processing loop starting');
-      while (true) {
-        // Check if we should stop processing due to stop signal or error in another loop
-        if (this.#shouldStopProcessing) {
-          console.log('SlowTrackRecorder: Stop signal received, terminating video processing loop');
-          break;
-        }
 
-        let readResult;
-        try {
-          readResult = await reader.read();
-        } catch (readError) {
-          // Stream was likely closed/cancelled during read - check if this is expected
-          if (this.#shouldStopProcessing) {
-            console.log('SlowTrackRecorder: Video stream read interrupted during stop - terminating gracefully');
-            break;
-          } else {
-            // Unexpected read error - re-throw
-            throw readError;
-          }
-        }
 
-        const { done, value: frame } = readResult;
 
-        if (done) {
-          console.log('SlowTrackRecorder: 🎬 Video stream ended (done=true)');
-          break; // The stream has ended.
-        }
-        
-        // Debug: Log every frame read for troubleshooting
-        console.log(`SlowTrackRecorder: 🎬 Read frame ${this.#videoFrameCount + 1} from MediaStreamTrackProcessor`);
-        console.log(`SlowTrackRecorder: 📊 Writer state before processing - desiredSize: ${writer.desiredSize}`);
 
-        // Track frame for cleanup (logging removed for performance)
-        if (frame) {
-          this.#activeFrames.add(frame);
-          this.#trackFrameLifecycle(frame, 'original', 'received_from_stream');
-        }
 
-        // Process frame and send directly to worker
-        try {
-          this.#videoFrameCount++;
-          const now = performance.now();
-          
-          // Log every 5 seconds to diagnose frame rate
-          if (now - this.#lastDiagnosticTime > 5000) {
-            console.log(`🎬 Video frames received from MediaStreamTrackProcessor: ${this.#videoFrameCount} (${(this.#videoFrameCount / ((now - (this.#recordingStartTime || now)) / 1000)).toFixed(1)} fps)`);
-            this.#lastDiagnosticTime = now;
-          }
-          
-          // On the very first frame, capture its timestamp as the baseline for this track.
-          if (this.#firstVideoTimestamp === null) {
-            this.#firstVideoTimestamp = frame.timestamp;
-          }
-
-          // Calculate the normalized timestamp relative to the first frame.
-          const normalizedTimestamp = frame.timestamp - this.#firstVideoTimestamp;
-
-          // Create a new VideoFrame with the normalized timestamp, preserving other properties.
-          const normalizedFrame = new VideoFrame(frame, {
-            timestamp: normalizedTimestamp,
-            duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
-          });
-
-          // Track normalized frame for cleanup
-          this.#activeFrames.add(normalizedFrame);
-          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
-
-          // 🎯 NON-BLOCKING WRITE: Prevent main thread hanging on backpressure
-          const frameId = this.#videoFrameCount;
-          
-          // Check writer state before attempting write
-          if (writer.desiredSize !== null && writer.desiredSize <= 0) {
-            console.log(`SlowTrackRecorder: 🚨 Writer backpressure detected, dropping frame ${frameId} (desiredSize: ${writer.desiredSize})`);
-            normalizedFrame.close();
-            this.#activeFrames.delete(normalizedFrame);
-          } else {
-            // Non-blocking write with error handling
-            writer.write(normalizedFrame).then(() => {
-              // Success - frame transferred
-              this.#activeFrames.delete(normalizedFrame);
-              if (frameId % 100 === 0) {
-                console.log(`SlowTrackRecorder: ✅ Frame ${frameId} successfully transferred (non-blocking)`);
-              }
-            }).catch(writeError => {
-              // Write failed - clean up frame
-              console.warn(`SlowTrackRecorder: ⚠️ Frame ${frameId} write failed:`, writeError instanceof Error ? writeError.message : String(writeError));
-              try {
-                normalizedFrame.close();
-              } catch (closeError) {
-                // Frame might already be closed
-              }
-              this.#activeFrames.delete(normalizedFrame);
-            });
-          }
-
-        } finally {
-          // Always close original frame and remove from leak detector
-          frame.close();
-          this.#activeFrames.delete(frame);
-          this.#untrackFrameLifecycle(frame);
-        }
-        
-        // Debug: Log loop iteration completion
-        console.log(`SlowTrackRecorder: 🔄 Completed processing frame ${this.#videoFrameCount}, continuing to next iteration`);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
-      console.error('SlowTrackRecorder: A fatal error occurred in the video processing loop.', errorMessage);
-      throw error instanceof Error ? error : new Error(errorMessage);
-    } finally {
-      try {
-        await writer.close();
-      } catch (closeError) {
-        console.warn('SlowTrackRecorder: Video writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
-      }
-      reader.releaseLock();
-    }
-  }
-
-  /**
-   * @deprecated Legacy TransformStream-based processing - replaced by direct processing
-   */
-  async #processVideoStream(
-    reader: ReadableStreamDefaultReader<VideoFrame>,
-    writer: WritableStreamDefaultWriter<VideoFrame>
-  ): Promise<void> {
-    try {
-      console.log('SlowTrackRecorder: 🎬 Video processing loop starting');
-      while (true) {
-        // Check if we should stop processing due to stop signal or error in another loop
-        if (this.#shouldStopProcessing) {
-          console.log('SlowTrackRecorder: Stop signal received, terminating video processing loop');
-          break;
-        }
-
-        // **KEY CHANGE**: Wait here if the pump is paused due to backpressure
-        if (this.#isPumpPaused) {
-          console.log('🚨 PUMP PAUSED: Waiting due to backpressure...');
-          await new Promise(resolve => setTimeout(resolve, 100));
-          continue; // Re-check conditions without reading new frames
-        }
-
-        let readResult;
-        try {
-          readResult = await reader.read();
-        } catch (readError) {
-          // Stream was likely closed/cancelled during read - check if this is expected
-          if (this.#shouldStopProcessing) {
-            console.log('SlowTrackRecorder: Video stream read interrupted during stop - terminating gracefully');
-            break;
-          } else {
-            // Unexpected read error - re-throw
-            throw readError;
-          }
-        }
-
-        const { done, value: frame } = readResult;
-
-        if (done) {
-          console.log('SlowTrackRecorder: 🎬 Video stream ended (done=true)');
-          break; // The stream has ended.
-        }
-        
-        // Debug: Log every frame read for troubleshooting
-        console.log(`SlowTrackRecorder: 🎬 Read frame ${this.#videoFrameCount + 1} from MediaStreamTrackProcessor`);
-
-        // Track frame for cleanup (logging removed for performance)
-        if (frame) {
-          this.#activeFrames.add(frame);
-          this.#trackFrameLifecycle(frame, 'original', 'received_from_stream');
-        }
-
-        // We wrap the processing of each frame to ensure the original is always closed.
-        try {
-          this.#videoFrameCount++;
-          const now = performance.now();
-          
-          // Debug: Log frame details for leak investigation
-          if (this.#videoFrameCount % 20 === 0) {
-            console.log(`SlowTrackRecorder: Processing frame ${this.#videoFrameCount}, pending: ${this.#pendingNormalizedFrames.size}`);
-          }
-          
-          // Log every 5 seconds to diagnose frame rate
-          if (now - this.#lastDiagnosticTime > 5000) {
-            console.log(`🎬 Video frames received from MediaStreamTrackProcessor: ${this.#videoFrameCount} (${(this.#videoFrameCount / ((now - (this.#recordingStartTime || now)) / 1000)).toFixed(1)} fps)`);
-            this.#lastDiagnosticTime = now;
-          }
-          
-          // On the very first frame, capture its timestamp as the baseline for this track.
-          if (this.#firstVideoTimestamp === null) {
-            this.#firstVideoTimestamp = frame.timestamp;
-          }
-
-          // Calculate the normalized timestamp relative to the first frame.
-          const normalizedTimestamp = frame.timestamp - this.#firstVideoTimestamp;
-
-          // Create a new VideoFrame with the normalized timestamp, preserving other properties.
-          const normalizedFrame = new VideoFrame(frame, {
-            timestamp: normalizedTimestamp,
-            duration: frame.duration ?? undefined, // Explicitly preserve duration as per TDD.
-          });
-
-          // Forward the newly timestamped frame to the worker
-          const frameId = this.#videoFrameCount; // Track frame for debugging
-
-          // Track normalized frame for cleanup (logging removed for performance)
-          this.#activeFrames.add(normalizedFrame);
-          this.#trackFrameLifecycle(normalizedFrame, 'normalized', 'created_for_worker');
-          
-          // === LAYER A: PROACTIVE PREVENTION (The "Belt") ===
-          // Check stream capacity BEFORE attempting write - handles obvious backpressure cases
-          if (writer.desiredSize !== null && writer.desiredSize <= 0) {
-            // Stream is under backpressure - defer write by closing frame immediately
-            console.log(`SlowTrackRecorder: 🚨 BACKPRESSURE DETECTED - Frame ${frameId} proactively deferred (desiredSize: ${writer.desiredSize})`);
-            
-            // 🎯 CRITICAL FIX: Close BOTH frames to prevent memory leak
-            try {
-              normalizedFrame.close();
-              this.#activeFrames.delete(normalizedFrame);
-              console.log(`SlowTrackRecorder: ✅ Closed normalized frame ${frameId}`);
-            } catch (closeError) {
-              console.warn(`SlowTrackRecorder: Error closing normalized frame ${frameId}:`, closeError);
-            }
-            
-            // 🎯 CRITICAL FIX: Close original frame too (this was the leak!)
-            try {
-              frame.close();
-              this.#activeFrames.delete(frame);
-              console.log(`SlowTrackRecorder: ✅ Closed original frame ${frameId} (LEAK FIX)`);
-            } catch (closeError) {
-              console.warn(`SlowTrackRecorder: Error closing original frame ${frameId}:`, closeError);
-            }
-            
-            this.#untrackFrameLifecycle(normalizedFrame);
-            this.#untrackFrameLifecycle(frame);
-            
-            // Continue to next frame - both frames now properly closed
-            continue;
-          }
-          
-          // === LAYER B: DEFENSIVE RECOVERY (The "Suspenders") ===
-          // Stream appeared ready, but race condition may occur between check and write
-          try {
-            // Use Promise.race to handle race condition where buffer fills between check and write
-            await Promise.race([
-              writer.write(normalizedFrame),
-              new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error('write timeout - race condition detected')), 100)
-              )
-            ]);
-            // Frame successfully transferred to worker - remove from leak detector
-            this.#activeFrames.delete(normalizedFrame);
-            
-            // Reduced logging frequency for performance
-            if (frameId % 100 === 0) {
-              console.log(`SlowTrackRecorder: Frame ${frameId} successfully queued to worker (desiredSize: ${writer.desiredSize})`);
-            }
-          } catch (writeError) {
-            const errorMsg = writeError instanceof Error ? writeError.message : String(writeError);
-            const isRaceCondition = errorMsg.includes('race condition detected');
-            const errorType = isRaceCondition ? 'race condition' : 'write error';
-            
-            console.warn(`SlowTrackRecorder: Video frame ${frameId} ${errorType}: ${errorMsg}`);
-            
-            // 🎯 SURGICAL STRIKE: Close frame and remove from leak detector on error
-            try {
-              normalizedFrame.close();
-              this.#activeFrames.delete(normalizedFrame);
-              console.log(`SlowTrackRecorder: Closed frame ${frameId} after ${errorType}`);
-            } catch (closeError) {
-              console.warn(`SlowTrackRecorder: Error closing failed frame ${frameId}:`, closeError);
-            }
-          } finally {
-            // ALWAYS remove the frame from the tracking set once it's been handled
-            this.#untrackFrameLifecycle(normalizedFrame);
-          }
-
-        } finally {
-          // Always close original frame and remove from leak detector
-          frame.close();
-          this.#activeFrames.delete(frame);
-          this.#untrackFrameLifecycle(frame);
-        }
-        
-        // Debug: Log loop iteration completion
-        console.log(`SlowTrackRecorder: 🔄 Completed processing frame ${this.#videoFrameCount}, continuing to next iteration`);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
-      console.error('SlowTrackRecorder: A fatal error occurred in the video processing loop.', errorMessage);
-      // Re-throw the original error to be caught by the processing promise handler.
-      throw error instanceof Error ? error : new Error(errorMessage);
-    } finally {
-      // Signal to the worker that no more video frames are coming.
-      try {
-        await writer.close();
-      } catch (closeError) {
-        // Stream might already be in an error state, which is expected during cleanup
-        console.warn('SlowTrackRecorder: Video writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
-      }
-      reader.releaseLock();
-    }
-  }
-
-  /**
-   * Processes a ReadableStream of audio data, normalizes their timestamps,
-   * and writes them to a WritableStream.
-   * @param reader - The reader for the raw audio track stream.
-   * @param writer - The writer to send timestamped frames to the worker.
-   */
-  async #processAudioStream(
-    reader: ReadableStreamDefaultReader<AudioData>,
-    writer: WritableStreamDefaultWriter<AudioData>
-  ): Promise<void> {
-    try {
-      while (true) {
-        // Check if we should stop processing due to stop signal or error in another loop
-        if (this.#shouldStopProcessing) {
-          console.log('SlowTrackRecorder: Stop signal received, terminating audio processing loop');
-          break;
-        }
-
-        // **SYNCHRONIZED PUMP CONTROL**: Wait here if the pump is paused due to backpressure
-        // This ensures both audio and video processing pause together, maintaining A/V sync
-        if (this.#isPumpPaused) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          continue; // Re-check conditions without reading new frames
-        }
-
-        let readResult;
-        try {
-          readResult = await reader.read();
-        } catch (readError) {
-          // Stream was likely closed/cancelled during read - check if this is expected
-          if (this.#shouldStopProcessing) {
-            console.log('SlowTrackRecorder: Audio stream read interrupted during stop - terminating gracefully');
-            break;
-          } else {
-            // Unexpected read error - re-throw
-            throw readError;
-          }
-        }
-
-        const { done, value: frame } = readResult;
-
-        if (done) {
-          break; // The stream has ended.
-        }
-
-        // Track the original audio frame to ensure cleanup
-        if (frame) {
-          this.#pendingOriginalAudioFrames.add(frame);
-        }
-
-        // We wrap the processing of each frame to ensure the original is always closed.
-        try {
-          // On the very first frame, capture its timestamp as the baseline for this track.
-          if (this.#firstAudioTimestamp === null) {
-            this.#firstAudioTimestamp = frame.timestamp;
-          }
-
-          // Calculate the normalized timestamp relative to the first frame.
-          const normalizedTimestamp = frame.timestamp - this.#firstAudioTimestamp;
-
-          // AudioData requires a manual copy of its underlying buffer.
-          // Correctly calculate the total buffer size needed for all audio channels.
-          let totalByteLength = 0;
-          for (let i = 0; i < frame.numberOfChannels; i++) {
-            totalByteLength += frame.allocationSize({ planeIndex: i });
-          }
-          const buffer = new ArrayBuffer(totalByteLength);
-          const bufferView = new Uint8Array(buffer);
-
-          // Copy the data from each channel (plane) into the new buffer sequentially.
-          let offset = 0;
-          for (let i = 0; i < frame.numberOfChannels; i++) {
-            const planeSize = frame.allocationSize({ planeIndex: i });
-            const planeBuffer = new ArrayBuffer(planeSize);
-            frame.copyTo(planeBuffer, { planeIndex: i });
-            
-            // Copy the plane's data into the main buffer at the correct offset.
-            bufferView.set(new Uint8Array(planeBuffer), offset);
-            offset += planeSize;
-          }
-
-          // Create a new AudioData object with the normalized timestamp and the complete, multi-channel buffer.
-          const normalizedFrame = new AudioData({
-            format: frame.format || 'f32-planar', // Default to f32-planar if format is null
-            sampleRate: frame.sampleRate,
-            numberOfFrames: frame.numberOfFrames,
-            numberOfChannels: frame.numberOfChannels,
-            timestamp: normalizedTimestamp,
-            data: buffer,
-          });
-
-          // Forward the newly timestamped frame to the worker.
-          // Use non-blocking write to prevent main thread stalls
-          writer.write(normalizedFrame).catch(writeError => {
-            console.warn('SlowTrackRecorder: Audio frame write failed (expected during high load):', writeError instanceof Error ? writeError.message : String(writeError));
-            // Don't throw - let the worker handle backpressure
-          });
-
-        } finally {
-          // CRITICAL: Close the original frame to release its underlying memory,
-          // even if the processing logic above throws an error.
-          frame.close();
-          // Remove from tracking
-          this.#pendingOriginalAudioFrames.delete(frame);
-        }
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : (error ? String(error) : 'Unknown error');
-      console.error('SlowTrackRecorder: A fatal error occurred in the audio processing loop.', errorMessage);
-      // Re-throw the error so the top-level Promise.all can catch it for cleanup.
-      throw error instanceof Error ? error : new Error(errorMessage);
-    } finally {
-      // Signal to the worker that no more audio frames are coming.
-      try {
-        await writer.close();
-      } catch (closeError) {
-        // Stream might already be in an error state, which is expected during cleanup
-        console.warn('SlowTrackRecorder: Audio writer close failed (expected during error cleanup):', closeError instanceof Error ? closeError.message : String(closeError));
-      }
-      reader.releaseLock();
-    }
-  }
 }
 
 

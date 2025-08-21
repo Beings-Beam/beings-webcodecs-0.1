@@ -1,11 +1,20 @@
 /// <reference lib="webworker" />
 
 /**
- * Recorder Worker - Video and Audio Encoding Implementation
+ * Legacy Single Recorder Worker - DEPRECATED
  * 
- * This worker handles the heavy lifting of video and audio processing and encoding
- * for the SlowTrackRecorder. Implements WebCodecs VideoEncoder and AudioEncoder
- * with mp4-muxer and webm-muxer for container creation.
+ * @deprecated This single-worker implementation has been replaced by the dual-worker
+ * architecture (video.worker.ts + audio.worker.ts) to eliminate performance bottlenecks.
+ * 
+ * The single-worker approach suffered from resource contention where high-frequency 
+ * audio processing would starve the video encoder, causing frame drops and A/V sync issues.
+ * 
+ * This file is maintained for compatibility during transition period only.
+ * Will be removed in v2.0. Use the new dual-worker architecture instead.
+ * 
+ * @see video.worker.ts - Dedicated video processing worker
+ * @see audio.worker.ts - Dedicated audio processing worker
+ * @see SlowTrackRecorder.ts - Main conductor class
  */
 
 // Dynamic imports to avoid worker loading issues
@@ -64,9 +73,11 @@ let totalVideoTimeProcessed = 0; // Total video time in milliseconds
 let totalAudioTimeProcessed = 0; // Total audio time in milliseconds
 
 // Event-driven backpressure management with hysteresis
-const HIGH_WATER_MARK = 30; // Start throttling
-const LOW_WATER_MARK = 10;  // Resume processing
-const HYSTERESIS_COOLDOWN_MS = 1000; // Prevent flapping with 1-second cooldown
+// 🎯 COORDINATED BACKPRESSURE: Lowered thresholds for better main thread coordination
+const HIGH_WATER_MARK = 8;   // Start throttling (was 30, too high)
+const LOW_WATER_MARK = 3;    // Resume processing (was 10, too high)
+const CRITICAL_WATER_MARK = 15; // Emergency threshold for force-dropping
+const HYSTERESIS_COOLDOWN_MS = 500; // Prevent flapping with 500ms cooldown (reduced for responsiveness)
 let isThrottled = false;
 let lastLowPressureTimestamp = 0;
 let consecutiveHighPressureCount = 0;
@@ -137,6 +148,25 @@ function sendSyncUpdate(): void {
     drift: Math.round(timeDrift), // Use time-based drift as primary metric
     timestamp: performance.now()
   };
+  
+  // 🎬 A/V SYNC CONSOLE LOGGING with encoder queue status
+  const absDrift = Math.abs(syncData.drift);
+  const videoQueue = videoEncoder?.encodeQueueSize || 0;
+  const audioQueue = audioEncoder?.encodeQueueSize || 0;
+  
+  if (absDrift > 15) {
+    console.warn(`🚨 Worker: SIGNIFICANT A/V DRIFT detected: ${syncData.drift}ms (Video: ${videoFramesProcessed} frames, Audio: ${audioFramesProcessed} frames) | Queues - Video: ${videoQueue}, Audio: ${audioQueue}`);
+  } else if (absDrift > 5) {
+    console.log(`⚠️ Worker: Minor A/V drift: ${syncData.drift}ms (Video: ${videoFramesProcessed}, Audio: ${audioFramesProcessed}) | Queues - Video: ${videoQueue}, Audio: ${audioQueue}`);
+  } else if (videoFramesProcessed % 150 === 0) { // Log perfect sync less frequently (every 5 seconds at 30fps)
+    console.log(`✅ Worker: Perfect A/V sync: ${syncData.drift}ms drift (Video: ${videoFramesProcessed}, Audio: ${audioFramesProcessed}) | Queues - Video: ${videoQueue}, Audio: ${audioQueue}`);
+  }
+  
+  // 📊 COMPREHENSIVE HEALTH CHECK: Replace individual per-frame logs with periodic summary
+  if (videoFramesProcessed % 150 === 0) {
+    const healthDuration = Math.round(performance.now() / 1000);
+    console.log(`📊 Health Check (${healthDuration}s): Video Frames: ${videoFramesProcessed}, Audio Frames: ${audioFramesProcessed}, A/V Drift: ${timeDrift.toFixed(0)}ms, Queues(V/A): ${videoQueue}/${audioQueue}, Mode: ${needsScaling ? 'downscaling' : 'direct'}, Dropped: ${videoFramesDropped}`);
+  }
   
   self.postMessage({
     type: 'sync-update',
@@ -213,9 +243,25 @@ function determineTargetResolution(
       // For auto mode, use smart scaling but snap to standard resolutions for better codec support
       const scaled = calculateScaledDimensions(originalWidth, originalHeight, 1920, 1080);
       
+      // 🎯 PERFORMANCE FIX: Intelligent scaling - avoid OffscreenCanvas for minor differences
       // Snap to standard resolutions for better hardware encoder compatibility
       if (scaled.width >= 1600) {
-        return { width: 1920, height: 1080, needsScaling: true }; // 1080p
+        const targetWidth = 1920;
+        const targetHeight = 1080;
+        
+        // Calculate percentage differences to avoid unnecessary scaling
+        const widthDifference = Math.abs(originalWidth - targetWidth) / originalWidth;
+        const heightDifference = Math.abs(originalHeight - targetHeight) / originalHeight;
+        
+        // Only scale if there's a meaningful difference (>2%) or actual downscaling needed
+        if (widthDifference > 0.02 || heightDifference > 0.02 || targetWidth < originalWidth || targetHeight < originalHeight) {
+          console.log(`Worker: Significant scaling needed - Width diff: ${(widthDifference * 100).toFixed(1)}%, Height diff: ${(heightDifference * 100).toFixed(1)}%`);
+          return { width: targetWidth, height: targetHeight, needsScaling: true }; // 1080p with scaling
+        } else {
+          // 🚀 CRITICAL PERFORMANCE FIX: Use original dimensions to bypass color space conversion
+          console.log(`Worker: Minor dimension difference detected - bypassing OffscreenCanvas (${originalWidth}x${originalHeight} vs ${targetWidth}x${targetHeight})`);
+          return { width: originalWidth, height: originalHeight, needsScaling: false }; // Native format, no scaling
+        }
       } else if (scaled.width >= 1200) {
         return { width: 1280, height: 720, needsScaling: true };  // 720p
       } else if (scaled.width >= 800) {
@@ -228,12 +274,33 @@ function determineTargetResolution(
       return { width: 3840, height: 2160, needsScaling: true };
     
     case '1080p':
+      // 🎯 PERFORMANCE FIX: Intelligent scaling for explicit 1080p target
+      const width1080Diff = Math.abs(originalWidth - 1920) / originalWidth;
+      const height1080Diff = Math.abs(originalHeight - 1080) / originalHeight;
+      if (width1080Diff <= 0.02 && height1080Diff <= 0.02 && originalWidth <= 1920 && originalHeight <= 1080) {
+        console.log(`Worker: 1080p target - using original dimensions ${originalWidth}x${originalHeight} (close enough to 1920x1080)`);
+        return { width: originalWidth, height: originalHeight, needsScaling: false };
+      }
       return { width: 1920, height: 1080, needsScaling: true };
     
     case '720p':
+      // 🎯 PERFORMANCE FIX: Intelligent scaling for explicit 720p target  
+      const width720Diff = Math.abs(originalWidth - 1280) / originalWidth;
+      const height720Diff = Math.abs(originalHeight - 720) / originalHeight;
+      if (width720Diff <= 0.02 && height720Diff <= 0.02 && originalWidth <= 1280 && originalHeight <= 720) {
+        console.log(`Worker: 720p target - using original dimensions ${originalWidth}x${originalHeight} (close enough to 1280x720)`);
+        return { width: originalWidth, height: originalHeight, needsScaling: false };
+      }
       return { width: 1280, height: 720, needsScaling: true };
     
     case '540p':
+      // 🎯 PERFORMANCE FIX: Intelligent scaling for explicit 540p target
+      const width540Diff = Math.abs(originalWidth - 960) / originalWidth;
+      const height540Diff = Math.abs(originalHeight - 540) / originalHeight;
+      if (width540Diff <= 0.02 && height540Diff <= 0.02 && originalWidth <= 960 && originalHeight <= 540) {
+        console.log(`Worker: 540p target - using original dimensions ${originalWidth}x${originalHeight} (close enough to 960x540)`);
+        return { width: originalWidth, height: originalHeight, needsScaling: false };
+      }
       return { width: 960, height: 540, needsScaling: true };
     
     default:
@@ -453,10 +520,32 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     });
     const frameCreateTime = performance.now() - frameCreateStart;
 
-    // The intelligent encode/drop logic with more aggressive threshold for scaling
-    if (videoEncoder.encodeQueueSize > 20) { // Using a slightly more aggressive threshold for scaling
-      console.warn(`Worker: Skipping frame due to queue backpressure (${videoEncoder.encodeQueueSize})`);
+    // 🎯 COORDINATED BACKPRESSURE: Intelligent frame dropping with immediate main thread notification
+    const currentQueueSize = videoEncoder.encodeQueueSize;
+    
+    // Note: Queue status is now logged in periodic health checks
+    
+    if (currentQueueSize > HIGH_WATER_MARK) {
+      console.warn(`Worker: Frame dropped due to encoder backpressure (queue: ${currentQueueSize}, threshold: ${HIGH_WATER_MARK})`);
       needsKeyFrame = true;
+      videoFramesDropped++;
+      
+      // 🚀 IMMEDIATE BACKPRESSURE NOTIFICATION: Tell main thread immediately
+      if (!isThrottled) {
+        isThrottled = true;
+        consecutiveHighPressureCount++;
+        console.warn(`Worker: Sending IMMEDIATE backpressure HIGH signal (queue: ${currentQueueSize})`);
+        self.postMessage({ 
+          type: 'pressure', 
+          status: 'high',
+          videoQueueSize: currentQueueSize,
+          audioQueueSize: audioEncoder?.encodeQueueSize || 0,
+          encoderQueueSize: currentQueueSize, // Direct encoder queue for main thread
+          immediate: true, // Flag for immediate response
+          consecutiveCount: consecutiveHighPressureCount
+        });
+      }
+      
       // Clean up frames before returning early
       if (scaledFrame) {
         scaledFrame.close();
@@ -464,9 +553,31 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
       originalFrame.close();
       return; // Return early, skipping the encode
     }
+    
+    // 🎯 CHECK FOR RECOVERY: Send low pressure signal if queue has drained
+    if (currentQueueSize <= LOW_WATER_MARK && isThrottled) {
+      isThrottled = false;
+      consecutiveHighPressureCount = 0;
+      lastLowPressureTimestamp = performance.now();
+      console.log(`Worker: Sending IMMEDIATE backpressure LOW signal (queue: ${currentQueueSize})`);
+      self.postMessage({ 
+        type: 'pressure', 
+        status: 'low',
+        videoQueueSize: currentQueueSize,
+        audioQueueSize: audioEncoder?.encodeQueueSize || 0,
+        encoderQueueSize: currentQueueSize,
+        immediate: true
+      });
+    }
 
     // Encode the scaled frame
     const encodeStart = performance.now();
+    
+    // ⏱️ TIMESTAMP LOGGING: Log scaled frame timestamp for sync verification
+    if (videoFramesProcessed % 30 === 0) {
+      console.log(`⏱️ Video Frame #${videoFramesProcessed} (downscaling) timestamp: ${scaledFrame.timestamp}µs (${(scaledFrame.timestamp / 1000).toFixed(1)}ms)`);
+    }
+    
     if (needsKeyFrame) {
       videoEncoder.encode(scaledFrame, { keyFrame: true });
       needsKeyFrame = false; // Reset the flag.
@@ -480,17 +591,16 @@ async function processFrameWithDownscaling(originalFrame: VideoFrame): Promise<v
     scaledFrame.close();
     originalFrame.close();
     
-    // Debug logging for downscaling path
-    if (videoFramesProcessed % 50 === 0) {
-      console.log(`Worker: Closed processed frame ${videoFramesProcessed + 1} after downscaling`);
-    }
+    // Note: Frame processing status now logged in periodic health checks
 
-    // 🎯 SURGICAL STRIKE: Always log performance for leak debugging
-    const totalTime = bitmapTime + drawTime + frameCreateTime + encodeTime;
-    console.log(`Worker: 🔧 Downscaling performance - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
-    
-    if (totalTime > 16) { // More than 1 frame at 60fps
-      console.warn(`Worker: 🚨 SLOW DOWNSCALING DETECTED - Total: ${totalTime.toFixed(1)}ms (threshold: 16ms)`);
+    // 📊 PERIODIC DOWNSCALING PERFORMANCE: Log every 150 frames to avoid spam
+    if (videoFramesProcessed % 150 === 0) {
+      const totalTime = bitmapTime + drawTime + frameCreateTime + encodeTime;
+      console.log(`📊 Downscaling performance sample - Bitmap: ${bitmapTime.toFixed(1)}ms, Draw: ${drawTime.toFixed(1)}ms, Create: ${frameCreateTime.toFixed(1)}ms, Encode: ${encodeTime.toFixed(1)}ms, Total: ${totalTime.toFixed(1)}ms`);
+      
+      if (totalTime > 16) { // More than 1 frame at 60fps
+        console.warn(`📊 SLOW DOWNSCALING DETECTED - Total: ${totalTime.toFixed(1)}ms (threshold: 16ms)`);
+      }
     }
 
     // Drift detection: increment video frame counter and track time
@@ -832,6 +942,11 @@ async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'o
             });
           }
           
+          // 📦 MUXER CHUNK VERIFICATION: Log first 5 audio chunks for initial diagnostics
+          if (audioFramesProcessed < 5) {
+            console.log(`📦 Muxer Audio Chunk ${audioFramesProcessed + 1} - Type: ${chunk.type}, Timestamp: ${chunk.timestamp}µs, Size: ${chunk.byteLength} bytes`);
+          }
+          
           // Pass encoded audio chunk to muxer
             muxer.addAudioChunk(chunk, metadata || {});
         } catch (error) {
@@ -849,7 +964,9 @@ async function setupAudioEncoder(audioConfig: AudioConfig & { codec: 'auto' | 'o
     currentAudioConfig = configSupport.config || audioEncoderConfig;
     
     // Configure the audio encoder
+    console.log(`📊 Configuring AudioEncoder - Pre-config state: ${audioEncoder.state}`);
     audioEncoder.configure(currentAudioConfig);
+    console.log(`📊 AudioEncoder configured successfully - Post-config state: ${audioEncoder.state}, queue size: ${audioEncoder.encodeQueueSize}`);
     
     // Capture final audio configuration for post-recording analysis
     finalAudioEncoderConfig = currentAudioConfig ? { ...currentAudioConfig } : null;
@@ -993,12 +1110,18 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
       canvasContext.imageSmoothingEnabled = false; // Disable smoothing for speed
       canvasContext.imageSmoothingQuality = 'low';
       
-      console.log('Worker: Created optimized OffscreenCanvas for downscaling', { 
+      console.log('Worker: 🎨 OffscreenCanvas scaling path enabled - will convert to RGBA format', { 
         scaledWidth, 
         scaledHeight,
         alpha: false,
         desynchronized: true,
         smoothing: false
+      });
+    } else {
+      // 🚀 CRITICAL PERFORMANCE: Direct encoding path - no color space conversion
+      console.log('Worker: 🚀 Direct encoding path enabled - frames will bypass color space conversion for maximum performance', {
+        originalWidth: scaledWidth,  // scaledWidth contains original width when needsScaling=false
+        originalHeight: scaledHeight // scaledHeight contains original height when needsScaling=false
       });
     }
 
@@ -1223,6 +1346,13 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
 
     console.log('Worker: Final encoder configuration:', encoderConfig);
     console.log('Worker: Selected codec:', finalCodec);
+    
+    // 🎯 PERFORMANCE LOGGING: Show whether we bypassed color space conversion
+    if (needsScaling) {
+      console.log(`Worker: ⚠️ Using OffscreenCanvas scaling path (${encoderConfig.width}x${encoderConfig.height}) - RGBA color conversion will occur`);
+    } else {
+      console.log(`Worker: 🚀 Using direct encoding path (${encoderConfig.width}x${encoderConfig.height}) - native format bypasses color conversion for maximum performance`);
+    }
 
     // Ensure finalCodec is valid before proceeding
     if (!finalCodec) {
@@ -1398,6 +1528,11 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
             });
           }
           
+          // 📦 MUXER CHUNK VERIFICATION: Log first 5 video chunks for initial diagnostics
+          if (videoFramesProcessed < 5) {
+            console.log(`📦 Muxer Video Chunk ${videoFramesProcessed + 1} - Type: ${chunk.type}, Timestamp: ${chunk.timestamp}µs, Size: ${chunk.byteLength} bytes, Duration: ${chunk.duration}µs`);
+          }
+          
           // Pass both chunk and metadata to the muxer - let encoder tell muxer the format
             muxer.addVideoChunk(chunk, metadata || {});
           
@@ -1415,7 +1550,9 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     });
 
     // Step 5: Configure Video Encoder
+    console.log(`📊 Configuring VideoEncoder - Pre-config state: ${videoEncoder.state}`);
     videoEncoder.configure(encoderConfig);
+    console.log(`📊 VideoEncoder configured successfully - Post-config state: ${videoEncoder.state}, queue size: ${videoEncoder.encodeQueueSize}`);
     
     // Capture final video configuration for post-recording analysis
     finalVideoConfig = { ...encoderConfig };
@@ -1432,6 +1569,11 @@ async function handleStartMessage(data: RecorderWorkerRequest): Promise<void> {
     };
     self.postMessage(response);
     console.log('Worker: Ready message sent successfully');
+
+    // 🎯 STARTUP SYNC FIX: Signal that worker is fully initialized and ready to receive data streams
+    // This prevents the main thread from flooding the pipeline before we're ready to process
+    self.postMessage({ type: 'worker-ready-for-data' });
+    console.log('Worker: 🚀 Worker setup complete - ready to receive data streams');
 
     // Step 6: Start Processing (REVERTED to stream-based)
     if (!data.stream) {
@@ -1524,17 +1666,31 @@ async function startVideoTrackProcessing(videoTrack: MediaStreamTrack): Promise<
       if (needsScaling) {
         await processFrameWithDownscaling(normalizedFrame);
       } else {
-        // Direct encoding path
+        // 🚀 DIRECT ENCODING PATH: No color space conversion - maximum performance
         if (videoEncoder) {
+          const encodeStart = performance.now();
+          
+          // ⏱️ TIMESTAMP VERIFICATION: Periodic timestamp logging
+          if (videoFramesProcessed % 150 === 0) {
+            console.log(`⏱️ Video Frame #${videoFramesProcessed} (dedicated) timestamp: ${normalizedFrame.timestamp}µs (${(normalizedFrame.timestamp / 1000).toFixed(1)}ms)`);
+          }
+          
           if (needsKeyFrame) {
             videoEncoder.encode(normalizedFrame, { keyFrame: true });
             needsKeyFrame = false;
-            console.log('Worker: 🚀 Forced keyframe in dedicated thread');
+            console.log('Worker: 🚀 Forced keyframe in direct encoding path (dedicated thread, no downscaling)');
           } else {
             videoEncoder.encode(normalizedFrame);
           }
           
+          const encodeTime = performance.now() - encodeStart;
+          
           normalizedFrame.close();
+          
+          // 📊 PERIODIC PERFORMANCE LOG: Log direct encoding performance every 150 frames
+          if (videoFramesProcessed % 150 === 0) {
+            console.log(`📊 Direct encoding performance sample (dedicated) - Encode: ${encodeTime.toFixed(1)}ms (bypassed color conversion)`);
+          }
           
           // Update drift detection
           if (ENABLE_DRIFT_DETECTION) {
@@ -1708,33 +1864,55 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
         continue;
       }
       
-      // Debug: Track frame receipt in worker
-      if (videoFramesProcessed % 50 === 0) {
-        console.log(`Worker: Received frame ${videoFramesProcessed + 1} from main thread`);
-      }
+      // Note: Comprehensive encoder health is now logged in periodic sync updates
       
-      // Debug: Log frame processing for debugging memory leaks
-      if (videoFramesProcessed % 50 === 0) {
-        console.log(`Worker: Processing video frame ${videoFramesProcessed + 1}, encoder queue: ${videoEncoder?.encodeQueueSize || 0}`);
-      }
-      
-      // Additional debug: Log when frames are actually closed
       const frameProcessedCount = videoFramesProcessed + 1;
       
-      // 🎯 SURGICAL STRIKE: Fixed backpressure frame drop logic
-      const queueThreshold = needsScaling ? 20 : 30; // Moderate threshold when downscaling
-      if (videoEncoder && videoEncoder.encodeQueueSize > queueThreshold) {
+      // 🎯 COORDINATED BACKPRESSURE: Unified frame drop logic with immediate main thread notification
+      const currentQueueSize = videoEncoder?.encodeQueueSize || 0;
+      
+      if (currentQueueSize > HIGH_WATER_MARK) {
         // The queue is too long, so we need to drop this frame.
         videoFramesDropped++;
-        console.warn(`Worker: 🚨 DROPPING FRAME due to queue backpressure (${videoEncoder.encodeQueueSize}). Threshold: ${queueThreshold}, Dropped: ${videoFramesDropped}`);
+        console.warn(`Worker: 🚨 DROPPING FRAME due to encoder backpressure (queue: ${currentQueueSize}, threshold: ${HIGH_WATER_MARK}). Dropped: ${videoFramesDropped}`);
+        
+        // 🚀 IMMEDIATE BACKPRESSURE NOTIFICATION: Tell main thread immediately
+        if (!isThrottled) {
+          isThrottled = true;
+          consecutiveHighPressureCount++;
+          console.warn(`Worker: Sending IMMEDIATE backpressure HIGH signal from video loop (queue: ${currentQueueSize})`);
+          self.postMessage({ 
+            type: 'pressure', 
+            status: 'high',
+            videoQueueSize: currentQueueSize,
+            audioQueueSize: audioEncoder?.encodeQueueSize || 0,
+            encoderQueueSize: currentQueueSize,
+            immediate: true,
+            consecutiveCount: consecutiveHighPressureCount
+          });
+        }
         
         // 🎯 CRITICAL FIX: Close frame and continue immediately - do NOT process further
         frame.close();
-        if (frameProcessedCount % 50 === 0) {
-          console.log(`Worker: 🚨 Closed dropped frame ${frameProcessedCount} due to backpressure`);
-        }
+        // Note: Frame drops are tracked in health check summaries
         needsKeyFrame = true; // Flag that we need a keyframe to recover.
         continue; // Skip to the next frame - frame is now closed and should not be processed
+      }
+      
+      // 🎯 CHECK FOR RECOVERY: Send low pressure signal if queue has drained
+      if (currentQueueSize <= LOW_WATER_MARK && isThrottled) {
+        isThrottled = false;
+        consecutiveHighPressureCount = 0;
+        lastLowPressureTimestamp = performance.now();
+        console.log(`Worker: Sending IMMEDIATE backpressure LOW signal from video loop (queue: ${currentQueueSize})`);
+        self.postMessage({ 
+          type: 'pressure', 
+          status: 'low',
+          videoQueueSize: currentQueueSize,
+          audioQueueSize: audioEncoder?.encodeQueueSize || 0,
+          encoderQueueSize: currentQueueSize,
+          immediate: true
+        });
       }
 
       // Encode the frame (with conditional downscaling)
@@ -1746,21 +1924,32 @@ async function startVideoProcessing(stream: ReadableStream<VideoFrame>): Promise
             await processFrameWithDownscaling(frame);
             frameClosed = true; // processFrameWithDownscaling closes the original frame
           } else {
-            // Direct path: encode frame as-is
+            // 🚀 DIRECT ENCODING PATH: No color space conversion - maximum performance
+            const encodeStart = performance.now();
+            
+            // ⏱️ TIMESTAMP VERIFICATION: Periodic timestamp logging for sync verification  
+            if (frameProcessedCount % 150 === 0) {
+              console.log(`⏱️ Video Frame #${frameProcessedCount} timestamp: ${frame.timestamp}µs (${(frame.timestamp / 1000).toFixed(1)}ms)`);
+            }
+            
             // If we just dropped frames, the next one we send MUST be a keyframe.
             if (needsKeyFrame) {
               videoEncoder.encode(frame, { keyFrame: true });
               needsKeyFrame = false; // Reset the flag.
-              console.log('Worker: Forced a keyframe to recover from dropped frames.');
+              console.log('Worker: 🚀 Forced keyframe in direct encoding path (no downscaling)');
             } else {
               videoEncoder.encode(frame);
             }
             
+            const encodeTime = performance.now() - encodeStart;
+            
             // Clean up the frame after encoding
             frame.close();
             frameClosed = true;
-            if (frameProcessedCount % 50 === 0) {
-              console.log(`Worker: Closed processed frame ${frameProcessedCount} after direct encoding`);
+            
+            // 📊 PERIODIC PERFORMANCE LOG: Log direct encoding performance every 150 frames
+            if (frameProcessedCount % 150 === 0) {
+              console.log(`📊 Direct encoding performance sample - Encode: ${encodeTime.toFixed(1)}ms (native format, no color conversion)`);
             }
             
             // Drift detection: increment video frame counter and track time
@@ -1818,14 +2007,14 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
         break;
       }
       
-      // Backpressure management - wait for encoder to catch up
+      // 📊 AUDIO ENCODER BACKPRESSURE: Monitor for critical queue overload
       if (audioEncoder && audioEncoder.encodeQueueSize > 30) {
-        console.warn('Worker: Audio encoder queue getting full, waiting for it to drain. Queue size:', audioEncoder.encodeQueueSize);
+        console.warn(`⚠️ Audio encoder queue overloaded (${audioEncoder.encodeQueueSize}), waiting for drain...`);
         // Wait until the queue size drops to a reasonable level
         while (audioEncoder && audioEncoder.encodeQueueSize > 15) {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-        console.log('Worker: Audio encoder queue drained to:', audioEncoder?.encodeQueueSize);
+        console.log(`✅ Audio encoder queue recovered (${audioEncoder?.encodeQueueSize})`);
       }
       
       // Encode the audio frame
@@ -1869,10 +2058,15 @@ async function startAudioProcessing(stream: ReadableStream<AudioData>): Promise<
             formatConversionNeeded = true;
           }
           
-          // Encode the frame (original, upmixed, or format-converted)
-          audioEncoder.encode(finalFrameToEncode);
-          
-          // Drift detection: increment audio frame counter and track time
+                  // ⏱️ AUDIO TIMESTAMP VERIFICATION: Periodic timestamp logging  
+        if (audioFramesProcessed % 500 === 0) { // Log less frequently for audio (more frames)
+          console.log(`⏱️ Audio Frame #${audioFramesProcessed} timestamp: ${finalFrameToEncode.timestamp}µs (${(finalFrameToEncode.timestamp / 1000).toFixed(1)}ms)`);
+        }
+        
+        // Encode the frame (original, upmixed, or format-converted)
+        audioEncoder.encode(finalFrameToEncode);
+        
+        // Drift detection: increment audio frame counter and track time
           if (ENABLE_DRIFT_DETECTION) {
             audioFramesProcessed++;
             // Calculate audio frame duration in milliseconds

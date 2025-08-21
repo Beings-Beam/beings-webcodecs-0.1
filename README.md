@@ -20,8 +20,9 @@ A framework-agnostic WebCodecs-based screen recording library with advanced vide
 - **Graceful Fallback**: Falls back to video-only if audio setup fails
 
 ### Core Features
-- **Framework Agnostic**: Pure TypeScript core with zero dependencies
-- **Worker-Based Processing**: Concurrent video and audio encoding for optimal performance
+- **Framework Agnostic**: Pure TypeScript core with zero framework dependencies
+- **Dual-Worker Architecture**: Eliminates performance bottlenecks with dedicated video and audio workers
+- **True Parallel Processing**: Video (30fps) and audio (48kHz) processing in isolated threads
 - **Intelligent Error Handling**: Robust fallback strategies for maximum compatibility
 
 ## Live Demo
@@ -102,12 +103,38 @@ const videoBlob = await recorder.stop();
 
 ## Architecture
 
+### Dual-Worker Design (v1.1+)
+
+Beings WebCodecs uses a sophisticated dual-worker architecture to achieve optimal performance:
+
+**🎭 Main Thread (Conductor)**
+- Manages worker lifecycle and coordination
+- Buffers encoded chunks from both workers  
+- Performs final A/V synchronization and muxing
+- Handles error recovery and graceful degradation
+
+**🎬 Video Worker (`video.worker.ts`)**
+- Dedicated thread for video processing (30fps)
+- Handles codec negotiation (AV1, HEVC, H.264, VP9)
+- Performs optional downscaling operations
+- Zero interference from audio processing
+
+**🎵 Audio Worker (`audio.worker.ts`)**  
+- Dedicated thread for high-frequency audio processing (48kHz = 1000+ frames/sec)
+- Handles codec selection (Opus, AAC, FLAC)
+- Performs channel upmixing and format conversion
+- Isolated from video pipeline for consistent performance
+
+**Performance Benefits:**
+- Eliminates resource contention between audio and video
+- Achieves true parallel processing on multi-core systems
+- Maintains frame-accurate A/V synchronization
+- Prevents audio processing from starving video encoder
+
+### Core Components
 - **@beings/core**: Framework-agnostic recording engine
-- **SlowTrackRecorder**: Main recording class with event system
-- **Dual-Pipeline Processing**: Concurrent video and audio encoding in dedicated worker
-- **Automatic Codec Detection**: Intelligent video and audio codec fallback chains
-- **Channel Upmixing**: Automatic mono-to-stereo conversion for hardware compatibility
-- **Sample Rate Preservation**: Maintains original audio quality without resampling
+- **SlowTrackRecorder**: Main conductor class with event system
+- **Automatic Codec Detection**: Intelligent fallback chains for maximum compatibility
 
 ## Development
 
